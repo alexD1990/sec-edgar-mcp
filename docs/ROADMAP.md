@@ -15,6 +15,13 @@ Andre funn fra samme kjøring:
 - [ ] `get_insider_trades`: merke sekundærsalg fra oppkjøpsfond (pris mangler, value_usd vises som 0)
 - [ ] `get_financials`: flagge utdatert `shares_outstanding` (VICR viste tall fra 2015)
 - [ ] `get_financials`: varsle når et kvartal mangler i rekken (SMTC manglet Q2 FY27)
+- [ ] `get_financials`: årsrader skal bare komme fra helårstall (fp=FY / 10-K). Amazon tagger 12-måneders
+      kontantstrøm i 10-Q, som nå vises som «årsrader» med fiscal_period Q1-Q3
+
+## Nye datakilder (fra FPS-analysen)
+- [ ] FRED-modul (renter, byggeaktivitet, makro), gratis API-nøkkel
+- [ ] EIA-modul (strømforbruk, etterspørsel fra datasentre), gratis API-nøkkel
+- [ ] Ferdig verktøy for kundenes capex (hyperskalere) og konkurrentsammenligning
 
 ## v0.2: bedre screening
 - [ ] Siste fire kvartaler (TTM) i stedet for ett kvartal, så sesongsvingninger jevnes ut
