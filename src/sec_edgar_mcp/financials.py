@@ -360,7 +360,7 @@ def summarize_financials(facts: dict[str, Any], years: int = 5, quarters: int = 
     notes = [
         "Money in USD millions. Growth is year-over-year vs. the same period one year earlier.",
         "Figures come straight from the company's XBRL filings; check source_accession for the filing.",
-        "Stock price and market cap are not in SEC data. Combine shares_outstanding with a price from elsewhere.",
+        "Stock price, market cap and P/E: use get_quote (shares_outstanding here is one class only).",
         "Debt is tagged in many ways: read debt_tags_on_balance_date for the full picture, "
         "and the balance sheet in the filing before stating total debt.",
     ]

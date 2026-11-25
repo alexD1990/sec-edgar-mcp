@@ -1,7 +1,7 @@
-"""Small JSON API client for key-based public data APIs (FRED, EIA).
+"""Small JSON API client for public data APIs (FRED, EIA, Finnhub, Nasdaq).
 
-The API key is read from the environment (or .env) on every call and is never included in
-results or error messages.
+The API key, when the API needs one, is read from the environment (or .env) on every call and
+is never included in results or error messages.
 """
 
 from __future__ import annotations
@@ -27,9 +27,10 @@ class JsonApiClient:
         self,
         name: str,
         base_url: str,
-        key_env: str,
+        key_env: str | None,
         *,
         key_param: str = "api_key",
+        headers: dict[str, str] | None = None,
         max_requests_per_second: float = 5.0,
         cache_entries: int = 128,
         transport: httpx2.AsyncBaseTransport | None = None,
@@ -39,7 +40,8 @@ class JsonApiClient:
         self.key_env = key_env
         self.key_param = key_param
         self._client = httpx2.AsyncClient(
-            timeout=httpx2.Timeout(30.0, connect=10.0), follow_redirects=True, transport=transport
+            timeout=httpx2.Timeout(30.0, connect=10.0), follow_redirects=True, transport=transport,
+            headers=headers,
         )
         self._interval = 1.0 / max_requests_per_second
         self._next_slot = 0.0
@@ -48,6 +50,8 @@ class JsonApiClient:
         self._cache_entries = cache_entries
 
     def _key(self) -> str:
+        if self.key_env is None:
+            return ""
         key = os.environ.get(self.key_env, "").strip()
         if not key:
             raise ApiError(
@@ -76,7 +80,7 @@ class JsonApiClient:
 
         key = self._key()
         url = f"{self.base_url}/{path.lstrip('/')}"
-        full_params = [*params, (self.key_param, key)]
+        full_params = [*params, (self.key_param, key)] if key else list(params)
         last_error = ""
         for attempt in range(3):
             await self._throttle()
@@ -118,13 +122,30 @@ _clients: dict[str, JsonApiClient] = {}
 CONFIG = {
     "fred": ("FRED", "https://api.stlouisfed.org/fred", "FRED_API_KEY"),
     "eia": ("EIA", "https://api.eia.gov/v2", "EIA_API_KEY"),
+    "finnhub": ("Finnhub", "https://finnhub.io/api/v1", "FINNHUB_API_KEY"),
+    "nasdaq": ("Nasdaq", "https://api.nasdaq.com/api", None),
+}
+
+# Nasdaq's public data API answers browsers only; without these headers requests hang.
+NASDAQ_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/130.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Origin": "https://www.nasdaq.com",
+    "Referer": "https://www.nasdaq.com/",
 }
 
 
 def get_api_client(which: str) -> JsonApiClient:
     if which not in _clients:
         name, base, env = CONFIG[which]
-        _clients[which] = JsonApiClient(name, base, env)
+        if which == "nasdaq":
+            _clients[which] = JsonApiClient(name, base, env, headers=NASDAQ_HEADERS, max_requests_per_second=3)
+        elif which == "finnhub":
+            _clients[which] = JsonApiClient(name, base, env, key_param="token", max_requests_per_second=1)
+        else:
+            _clients[which] = JsonApiClient(name, base, env)
     return _clients[which]
 
 

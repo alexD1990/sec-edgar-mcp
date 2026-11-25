@@ -15,7 +15,7 @@ import time
 
 import anyio
 
-from sec_edgar_mcp import filings, financials, insiders, macro, screener
+from sec_edgar_mcp import filings, financials, insiders, macro, market, screener
 from sec_edgar_mcp.apiclient import get_api_client
 from sec_edgar_mcp.companies import resolve_company
 from sec_edgar_mcp.config import load_env
@@ -83,7 +83,7 @@ async def main(ticker: str) -> None:
             return f"10-year Treasury {r['summary'].get('latest_value')}% on {r['summary'].get('latest_date')}"
 
         async def fred_search():
-            r = await macro.fred_search(get_api_client("fred"), "data center construction spending", limit=3)
+            r = await macro.fred_search(get_api_client("fred"), "construction spending power", limit=3)
             return ", ".join(f"{s['id']} ({s['observation_end']})" for s in r["series"]) or "no hits"
 
         await step("fred_series DGS10", fred_series)
@@ -101,6 +101,50 @@ async def main(ticker: str) -> None:
         await step("eia_electricity_sales", eia_sales)
     else:
         print("SKIP EIA: no EIA_API_KEY in environment or .env")
+
+    print()
+    nasdaq, finnhub = get_api_client("nasdaq"), get_api_client("finnhub")
+
+    def quote_step(symbol):
+        async def run_quote():
+            sym_info = await resolve_company(client, symbol)
+            q = await market.best_quote(nasdaq, finnhub, sym_info["ticker"])
+            v = market.valuation(q, await client.company_facts(sym_info["cik"]))
+            classes = (v.get("shares_detail") or {}).get("per_class_m")
+            return (f"${q['price']} ({q.get('price_time')}), 52w {q.get('week52_low')}-{q.get('week52_high')}, "
+                    f"cap SEC {v['market_cap_musd']}m vs Nasdaq {q.get('market_cap_nasdaq_musd')}m, "
+                    f"classes {classes}, P/E {v['pe_ttm']}, P/S {v['ps_ttm']}")
+        return run_quote
+
+    async def history():
+        r = await market.price_history(nasdaq, info["ticker"], days=365)
+        return (f"{r['trading_days']} days {r['from']}..{r['to']}, 1y {r['change_pct']['1y']}%, "
+                f"{r['below_high_pct']}% below high {r['high']['price']} ({r['high']['date']})")
+
+    async def caps():
+        r = await market.market_caps(nasdaq)
+        return f"{len(r)} symbols; SMCI cap {market.lookup_market(r, 'SMCI')}"
+
+    async def scr_val():
+        table = await market.market_caps(nasdaq)
+        r = await screener.screen(client, min_revenue_growth_pct=30, max_revenue_musd=500, market=table,
+                                  max_pe=20, max_market_cap_musd=5000, sort_by="pe", limit=5)
+        top = ", ".join(f"{x['ticker']} (P/E {x['pe_annualized']}, +{x['revenue_growth_pct']}%)" for x in r["results"])
+        return f"{r['matches']} matches; cheapest: {top}"
+
+    await step(f"get_quote {ticker}", quote_step(ticker))
+    await step("get_quote FPS (Up-C)", quote_step("FPS"))
+    await step("get_quote GOOGL (3 classes)", quote_step("GOOGL"))
+    await step("get_price_history", history)
+    await step("market_caps (bulk)", caps)
+    await step("screen with valuation", scr_val)
+    if os.environ.get("FINNHUB_API_KEY"):
+        async def fh():
+            q = await market.finnhub_quote(finnhub, ticker)
+            return f"${q['price']} at {q['price_time']}"
+        await step("finnhub_quote (fallback)", fh)
+    else:
+        print("SKIP Finnhub: no FINNHUB_API_KEY (optional fallback)")
 
 
 if __name__ == "__main__":

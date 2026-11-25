@@ -20,9 +20,11 @@ ved å lese dokumentene.
 | `fred_search` / `fred_series` | Makrodata fra FRED (renter, inflasjon, byggeaktivitet …) med siste verdi og endring siste år |
 | `eia_electricity_sales` | Strømsalg per delstat og sektor fra EIA, med 12-månedersvekst (indikator for datasenterutbygging) |
 | `eia_browse` / `eia_data` | Utforsk og hent hvilken som helst EIA-datasett |
+| `get_quote` | Kurs, 52-ukers intervall og analytikermål, pluss markedsverdi, P/E, P/S og P/FCF regnet fra selskapets egne tall (alle aksjeklasser summert) |
+| `get_price_history` | Kurshistorikk: avkastning 1/3/6/12 mnd, avstand fra toppen, volatilitet |
 
-Det SEC **ikke** har: aksjekurser. P/E og markedsverdi må regnes ut med en kurs fra et annet sted
-(`get_financials` gir antall aksjer).
+`screen_companies` kan også legge på verdsettelse (`with_valuation`, `max_pe`, `max_market_cap_musd`,
+`sort_by="pe"`): én ekstra forespørsel henter kurs og markedsverdi for alle amerikanske aksjer.
 
 ## Arkitektur
 
@@ -64,6 +66,9 @@ python scripts/smoke_test.py SMCI  # live mot SEC: hvert verktøy skal vise OK
 FRED- og EIA-verktøyene trenger gratis API-nøkler i samme `.env`-fil:
 `FRED_API_KEY=...` (fred.stlouisfed.org → My Account → API Keys) og `EIA_API_KEY=...` (eia.gov/opendata).
 Nøklene vises aldri i svar eller feilmeldinger.
+
+Kurser kommer fra Nasdaqs offentlige kurs-API uten nøkkel. Det er uoffisielt og kan endre seg eller
+blokkere skyservere. Med `FINNHUB_API_KEY=...` (gratis på finnhub.io) brukes Finnhub som reserve for siste kurs.
 
 SEC krever at User-Agent inneholder navn og e-post. Uten dette blir du blokkert.
 Serveren leser `.env` i prosjektmappen selv, så MCP-klienter trenger ikke sende miljøvariabler.

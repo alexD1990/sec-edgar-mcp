@@ -7,6 +7,7 @@ import os
 from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 from pydantic import Field
 from starlette.requests import Request
@@ -23,6 +24,7 @@ from .insiders import insider_trades
 from .macro import eia_browse as eia_browse_route
 from .macro import eia_data as eia_data_query
 from .macro import electricity_sales, fred_search as fred_search_series, fred_series as fred_series_data
+from .market import best_quote, market_caps, price_history, valuation
 from .screener import screen
 from .sec_client import get_client
 
@@ -46,7 +48,12 @@ Macro and energy context (needs FRED_API_KEY / EIA_API_KEY in .env):
 - eia_electricity_sales for power demand by state and sector (a proxy for data-center build-out);
   eia_browse + eia_data for any other EIA dataset.
 
-There are no stock prices in SEC data; valuation (P/E, market cap) needs a price from another source.
+Prices and valuation (Nasdaq, no key; Finnhub fallback with FINNHUB_API_KEY):
+- get_quote: price, 52-week range, analyst target, plus market cap, P/E, P/S and P/FCF computed from
+  the company's own filings (share classes summed).
+- get_price_history: returns over 1m/3m/6m/1y, distance from high, volatility.
+- screen_companies with with_valuation=true (or max_pe / market-cap filters) adds a rough P/E and P/S
+  for every match; sort_by="pe" lists the cheapest first.
 Always cite the accession number or URL that each figure comes from.
 """
 
@@ -88,8 +95,17 @@ async def screen_companies(
     min_net_margin_pct: Annotated[float | None, Field(description="Minimum net margin in %.")] = None,
     min_gross_margin_pct: Annotated[float | None, Field(description="Minimum gross margin in %.")] = None,
     include_otc: Annotated[bool, Field(description="Include OTC-traded companies (default: only exchange-listed).")] = False,
-    sort_by: Literal["revenue_growth", "net_margin", "net_income_growth", "revenue", "gross_margin"] = "revenue_growth",
+    sort_by: Annotated[
+        Literal["revenue_growth", "net_margin", "net_income_growth", "revenue", "gross_margin", "pe", "ps", "market_cap"],
+        Field(description="pe, ps and market_cap sort lowest first and need valuation."),
+    ] = "revenue_growth",
     limit: Annotated[int, Field(ge=1, le=200)] = 50,
+    with_valuation: Annotated[
+        bool, Field(description="Add price, market cap and annualized P/E and P/S from Nasdaq (one extra request).")
+    ] = False,
+    max_pe: Annotated[float | None, Field(description="Maximum annualized P/E (implies with_valuation).")] = None,
+    min_market_cap_musd: Annotated[float | None, Field(description="Minimum market cap, USD millions.")] = None,
+    max_market_cap_musd: Annotated[float | None, Field(description="Maximum market cap, USD millions (e.g. 2000 for small caps).")] = None,
 ) -> dict[str, Any]:
     """Screen ALL SEC filers at once on growth and profitability using XBRL frames.
 
@@ -97,6 +113,10 @@ async def screen_companies(
     exchange-listed companies with revenue, growth, margins and net income.
     Use it to find candidates, then verify each one with get_financials and read_filing.
     """
+    wants_market = with_valuation or sort_by in ("pe", "ps", "market_cap") or any(
+        v is not None for v in (max_pe, min_market_cap_musd, max_market_cap_musd)
+    )
+    market = await market_caps(get_api_client("nasdaq")) if wants_market else None
     return await screen(
         get_client(),
         period=period,
@@ -110,7 +130,46 @@ async def screen_companies(
         include_otc=include_otc,
         sort_by=sort_by,
         limit=limit,
+        market=market,
+        max_pe=max_pe,
+        min_market_cap_musd=min_market_cap_musd,
+        max_market_cap_musd=max_market_cap_musd,
     )
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def get_quote(company: Company) -> dict[str, Any]:
+    """Latest stock price with valuation: market cap (all share classes, from SEC cover page), trailing
+    P/E on reported diluted EPS, P/S, price/free cash flow, 52-week range and analyst 1-year target."""
+    client = get_client()
+    info = await resolve_company(client, company)
+    if not info.get("ticker"):
+        raise ToolError(f"{info.get('name')} has no ticker on EDGAR, so there is no stock price.")
+    quote = await best_quote(get_api_client("nasdaq"), get_api_client("finnhub"), info["ticker"])
+    facts = await client.company_facts(info["cik"])
+    result = {"company": info.get("name"), "ticker": info["ticker"], "cik": info["cik"], "quote": quote}
+    result["valuation"] = valuation(quote, facts)
+    if quote.get("week52_high"):
+        result["quote"]["below_52w_high_pct"] = round(100 * (quote["price"] / quote["week52_high"] - 1), 1)
+    if quote.get("analyst_target_1y"):
+        result["quote"]["upside_to_target_pct"] = round(100 * (quote["analyst_target_1y"] / quote["price"] - 1), 1)
+    return result
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def get_price_history(
+    company: Company,
+    days: Annotated[int, Field(ge=10, le=3650, description="Calendar days to look back.")] = 365,
+    max_points: Annotated[int, Field(ge=10, le=400, description="Most closing prices to return (statistics use all days).")] = 60,
+) -> dict[str, Any]:
+    """Daily price history from Nasdaq: returns over 1, 3, 6 and 12 months, high and low with dates,
+    distance from the high, volatility, average volume and a sampled list of closes."""
+    info = await resolve_company(get_client(), company)
+    if not info.get("ticker"):
+        raise ToolError(f"{info.get('name')} has no ticker on EDGAR, so there is no price history.")
+    result = await price_history(get_api_client("nasdaq"), info["ticker"], days=days, max_points=max_points)
+    result["company"] = info.get("name")
+    return result
 
 
 @mcp.tool(annotations=READ_ONLY)

@@ -36,7 +36,11 @@ Andre funn fra samme kjøring:
 - [ ] Varelager og kundefordringer som vokser raskere enn omsetningen
 
 ## v0.4: verdsettelse
-- [ ] Kurs fra en ekstern kilde (f.eks. FMP-gratisnivå eller Stooq) så vi kan regne P/E, EV/omsetning og PEG
+- [x] Kurs fra ekstern kilde (Nasdaq uten nøkkel, Finnhub som reserve): `get_quote`, `get_price_history`
+- [x] P/E, P/S og P/FCF på siste fire kvartaler, markedsverdi med alle aksjeklasser
+- [x] Verdsettelse i `screen_companies` (`max_pe`, markedsverdifilter, sortering på P/E)
+- [ ] EV (netto gjeld) og PEG i `get_quote`
+- [ ] Screeningens P/E bruker Nasdaqs markedsverdi (kan telle én aksjeklasse): bytte til SEC-aksjetall for treffene
 - [ ] Analytikerdekning som mål på hvor «under radaren» et selskap er
 
 ## Drift
