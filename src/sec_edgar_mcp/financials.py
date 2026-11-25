@@ -9,6 +9,7 @@ take the first concept that has a value, and the most recently filed value wins
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -61,6 +62,15 @@ INSTANT_METRICS: dict[str, Metric] = {
     "total_assets": Metric(("Assets",), kind="instant"),
     "total_liabilities": Metric(("Liabilities",), kind="instant"),
     "long_term_debt": Metric(("LongTermDebt", "LongTermDebtNoncurrent"), kind="instant"),
+    "convertible_debt": Metric((
+        "ConvertibleNotesPayable",
+        "ConvertibleDebtNoncurrent",
+        "ConvertibleLongTermNotesPayable",
+        "ConvertibleNotesPayableCurrent",
+    ), kind="instant"),
+    "short_term_debt": Metric(
+        ("DebtCurrent", "ShortTermBorrowings", "LongTermDebtCurrent", "LineOfCredit"), kind="instant"
+    ),
     "stockholders_equity": Metric(
         ("StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"),
         kind="instant",
@@ -91,6 +101,13 @@ def _facts_for(facts: dict[str, Any], metric: Metric, concept: str) -> list[dict
     return node.get("units", {}).get(metric.unit, [])
 
 
+def _with_origin(fact: dict[str, Any], origin: dict[str, Any]) -> dict[str, Any]:
+    fact["orig_fy"] = origin.get("orig_fy", origin.get("fy"))
+    fact["orig_fp"] = origin.get("orig_fp", origin.get("fp"))
+    fact["orig_filed"] = origin.get("orig_filed", origin.get("filed", ""))
+    return fact
+
+
 def extract_durations(facts: dict[str, Any], metric: Metric) -> dict[str, dict[tuple[str, str], dict[str, Any]]]:
     """Return {'annual': {(start,end): fact}, 'quarterly': {...}} merged across concepts."""
     out: dict[str, dict[tuple[str, str], dict[str, Any]]] = {"annual": {}, "quarterly": {}}
@@ -108,8 +125,17 @@ def extract_durations(facts: dict[str, Any], metric: Metric) -> dict[str, dict[t
                 continue  # year-to-date (6/9 month) values
             key = (fact["start"], fact["end"])
             current = per_concept[bucket].get(key)
-            if current is None or fact.get("filed", "") > current.get("filed", ""):
-                per_concept[bucket][key] = {**fact, "concept": concept}
+            filed = fact.get("filed", "")
+            if current is None:
+                per_concept[bucket][key] = _with_origin({**fact, "concept": concept}, fact)
+                continue
+            # Value: the latest filing wins (restatements). Fiscal year/period labels: the
+            # earliest filing wins, because later filings repeat old periods as comparatives
+            # tagged with the *new* filing's fiscal year.
+            origin = current if current["orig_filed"] <= filed else fact
+            if filed > current.get("filed", ""):
+                current = {**fact, "concept": concept}
+            per_concept[bucket][key] = _with_origin(current, origin)
         # Higher-priority concepts win; lower ones only fill periods that are missing.
         for bucket in ("annual", "quarterly"):
             existing_ends = {end for (_, end) in out[bucket]}
@@ -144,6 +170,8 @@ def derive_missing_q4(annual: dict, quarterly: dict) -> dict[tuple[str, str], di
             "filed": a_fact.get("filed"),
             "form": a_fact.get("form"),
             "accn": a_fact.get("accn"),
+            "orig_fy": a_fact.get("orig_fy"),
+            "orig_fp": "Q4",
             "derived": True,
         }
     return derived
@@ -199,9 +227,9 @@ def _build_rows(per_metric: dict[str, dict[tuple[str, str], dict[str, Any]]]) ->
             row["_raw"][name] = fact["val"]
             if fact.get("derived"):
                 row["derived_from_annual"] = True
-            if "fy" in fact and "fiscal_year" not in row:
-                row["fiscal_year"] = fact.get("fy")
-                row["fiscal_period"] = fact.get("fp")
+            if fact.get("orig_fy") and "fiscal_year" not in row:
+                row["fiscal_year"] = fact.get("orig_fy")
+                row["fiscal_period"] = fact.get("orig_fp")
             row.setdefault("source_form", fact.get("form"))
             row.setdefault("source_accession", fact.get("accn"))
     return rows
@@ -249,6 +277,29 @@ def _finish_rows(rows: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     return finished
 
 
+DEBT_TAG_RE = re.compile(r"debt|notespayable|borrowing|lineofcredit|loanspayable", re.I)
+STALE_DAYS = 100
+
+
+def debt_tags_on(facts: dict[str, Any], as_of: str) -> dict[str, float]:
+    """Every US-GAAP debt-like tag the company reported on one balance-sheet date (USD millions).
+
+    Companies use many different debt tags; this raw list makes sure no borrowing is missed
+    even when it is not one of the standard concepts above.
+    """
+    found: dict[str, tuple[str, float]] = {}
+    for concept, node in facts.get("facts", {}).get("us-gaap", {}).items():
+        if not DEBT_TAG_RE.search(concept) or "FairValue" in concept or "Issuance" in concept:
+            continue
+        for fact in node.get("units", {}).get("USD", []):
+            if "start" in fact or fact.get("end") != as_of:
+                continue
+            filed = fact.get("filed", "")
+            if concept not in found or filed > found[concept][0]:
+                found[concept] = (filed, fact["val"])
+    return {concept: round(val / 1e6, 2) for concept, (_, val) in sorted(found.items())}
+
+
 def summarize_financials(facts: dict[str, Any], years: int = 5, quarters: int = 8) -> dict[str, Any]:
     annual_by_metric: dict[str, dict] = {}
     quarterly_by_metric: dict[str, dict] = {}
@@ -279,18 +330,40 @@ def summarize_financials(facts: dict[str, Any], years: int = 5, quarters: int = 
         balance[name] = {
             "value_m" if metric.unit == "shares" else "value_musd": round(value / 1e6, 2),
             "as_of": latest_end,
+            "concept": fact.get("concept"),
         }
+
+    # The balance-sheet date is the latest date among USD items (shares are often dated later).
+    usd_dates = [v["as_of"] for v in balance.values() if "value_musd" in v]
+    balance_date = max(usd_dates) if usd_dates else None
+    stale = []
+    if balance_date:
+        for name, item in balance.items():
+            if "value_musd" in item and (_d(balance_date) - _d(item["as_of"])).days > STALE_DAYS:
+                item["stale"] = True
+                stale.append(name)
+
+    notes = [
+        "Money in USD millions. Growth is year-over-year vs. the same period one year earlier.",
+        "Figures come straight from the company's XBRL filings; check source_accession for the filing.",
+        "Stock price and market cap are not in SEC data. Combine shares_outstanding with a price from elsewhere.",
+        "Debt is tagged in many ways: read debt_tags_on_balance_date for the full picture, "
+        "and the balance sheet in the filing before stating total debt.",
+    ]
+    if stale:
+        notes.append(
+            f"STALE: {', '.join(stale)} not reported on {balance_date}; the company probably switched "
+            "to another tag. Do not use these values as current."
+        )
 
     return {
         "company": facts.get("entityName"),
         "cik": facts.get("cik"),
         "annual": annual,
         "quarterly": quarterly,
+        "balance_sheet_date": balance_date,
         "latest_balance_sheet": balance,
+        "debt_tags_on_balance_date": debt_tags_on(facts, balance_date) if balance_date else {},
         "xbrl_concepts_used": concepts_used,
-        "notes": [
-            "Money in USD millions. Growth is year-over-year vs. the same period one year earlier.",
-            "Figures come straight from the company's XBRL filings; check source_accession for the filing.",
-            "Stock price and market cap are not in SEC data. Combine shares_outstanding with a price from elsewhere.",
-        ],
+        "notes": notes,
     }

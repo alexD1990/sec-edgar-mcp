@@ -105,8 +105,34 @@ def test_financials_quarters_annual_and_balance(client):
     assert q3["eps_diluted"] == 0.6
 
     balance = result["latest_balance_sheet"]
-    assert balance["inventory"] == {"value_musd": 140.0, "as_of": "2026-09-30"}
+    assert balance["inventory"]["value_musd"] == 140.0 and balance["inventory"]["as_of"] == "2026-09-30"
     assert balance["shares_outstanding"]["value_m"] == 50.0
+    assert result["balance_sheet_date"] == "2026-09-30"
+
+
+def test_fiscal_labels_come_from_the_original_filing(client):
+    facts = run(client.company_facts, ACME)
+    result = financials.summarize_financials(facts)
+    q3_2025 = next(r for r in result["quarterly"] if r["period_end"] == "2025-09-30")
+    assert q3_2025["revenue_musd"] == 155.0  # value from the later restatement ...
+    assert (q3_2025["fiscal_year"], q3_2025["fiscal_period"]) == (2025, "Q3")  # ... label from the original
+    q4 = next(r for r in result["quarterly"] if r["period_end"] == "2025-12-31")
+    assert (q4["fiscal_year"], q4["fiscal_period"]) == (2025, "Q4")
+    fy = next(r for r in result["annual"] if r["period_end"] == "2025-12-31")
+    assert (fy["fiscal_year"], fy["fiscal_period"]) == (2025, "FY")
+
+
+def test_abandoned_debt_tag_is_flagged_and_other_debt_listed(client):
+    facts = run(client.company_facts, ACME)
+    result = financials.summarize_financials(facts)
+    balance = result["latest_balance_sheet"]
+    assert balance["long_term_debt"]["stale"] is True
+    assert any("STALE: long_term_debt" in n for n in result["notes"])
+    assert balance["convertible_debt"]["value_musd"] == 2000.0
+    assert balance["short_term_debt"]["value_musd"] == 100.0
+    assert "stale" not in balance["convertible_debt"]
+    tags = result["debt_tags_on_balance_date"]
+    assert tags == {"ConvertibleNotesPayable": 2000.0, "DebtInstrumentFaceAmount": 2100.0, "LongTermDebtCurrent": 100.0}
 
 
 # ------------------------------------------------------------------ insiders

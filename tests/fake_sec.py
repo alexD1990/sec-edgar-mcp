@@ -117,6 +117,18 @@ ACME_FACTS = {
                 fact(None, "2025-12-31", 80e6, "2026-02-20", form="10-K"),
                 fact(None, "2026-09-30", 140e6, "2026-11-05"),
             ]}},
+            "LongTermDebt": {"units": {"USD": [
+                fact(None, "2024-03-31", 85e6, "2024-05-05"),  # tag abandoned since
+            ]}},
+            "ConvertibleNotesPayable": {"units": {"USD": [
+                fact(None, "2026-09-30", 2000e6, "2026-11-05"),
+            ]}},
+            "LongTermDebtCurrent": {"units": {"USD": [
+                fact(None, "2026-09-30", 100e6, "2026-11-05"),
+            ]}},
+            "DebtInstrumentFaceAmount": {"units": {"USD": [
+                fact(None, "2026-09-30", 2100e6, "2026-11-05"),
+            ]}},
             "CashAndCashEquivalentsAtCarryingValue": {"units": {"USD": [
                 fact(None, "2026-09-30", 95e6, "2026-11-05"),
             ]}},
