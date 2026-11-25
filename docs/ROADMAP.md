@@ -1,5 +1,21 @@
 # Roadmap
 
+## Neste: fra første screening (arbeidsflyt B, 25.11.2026)
+Mye av frasorteringen ble gjort manuelt. Disse skal inn i `screen_companies`:
+- [ ] **Bransjefilter via SIC-kode** (fra submissions): utelate fond, ETF-er, trusts, banker, forsikring,
+      REIT-er, shipping og biotek/legemidler som standard, med mulighet for å slå dem på igjen
+- [ ] **Urimelige marginer**: flagge eller utelate netto margin over 60 % (engangsgevinster, skatteposter,
+      verdiendringer) og negativ bruttomargin
+- [ ] **Jevn vekst**: krav om vekst over terskel i minst N av de siste kvartalene, ikke bare ett
+      (skilte FPS/INOD/PAYS fra AEHR/VICR/SMTC)
+- [ ] **Innsidesignal**: valgfritt filter «minst X innsidere har kjøpt på åpent marked siste Y dager»
+      (FPS: 6 innsidere kjøpte etter 70 % kursfall)
+
+Andre funn fra samme kjøring:
+- [ ] `get_insider_trades`: merke sekundærsalg fra oppkjøpsfond (pris mangler, value_usd vises som 0)
+- [ ] `get_financials`: flagge utdatert `shares_outstanding` (VICR viste tall fra 2015)
+- [ ] `get_financials`: varsle når et kvartal mangler i rekken (SMTC manglet Q2 FY27)
+
 ## v0.2: bedre screening
 - [ ] Siste fire kvartaler (TTM) i stedet for ett kvartal, så sesongsvingninger jevnes ut
 - [ ] Vekstakselerasjon: vekst siste kvartal mot vekst kvartalet før
