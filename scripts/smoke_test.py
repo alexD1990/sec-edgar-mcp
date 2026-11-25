@@ -16,6 +16,7 @@ import anyio
 
 from sec_edgar_mcp import filings, financials, insiders, screener
 from sec_edgar_mcp.companies import resolve_company
+from sec_edgar_mcp.config import load_env
 from sec_edgar_mcp.sec_client import get_client
 
 
@@ -75,4 +76,5 @@ async def main(ticker: str) -> None:
 
 
 if __name__ == "__main__":
+    load_env()
     anyio.run(main, sys.argv[1] if len(sys.argv) > 1 else "SMCI")

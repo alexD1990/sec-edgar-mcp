@@ -266,3 +266,31 @@ def test_cache_is_bounded_by_bytes():
     c._cache_put("d", 5, 60, 95)  # pushes total over 300 -> oldest ("a") evicted
     assert c._cache_get("a") is None and c._cache_get("d") == 5
     assert c._cache_bytes <= 300
+
+
+def test_env_file_fills_missing_values_only(tmp_path, monkeypatch):
+    from sec_edgar_mcp.config import load_env, parse_env_file
+
+    env = tmp_path / ".env"
+    env.write_text(
+        '# comment\n'
+        'SEC_USER_AGENT="Ola Nordmann ola@example.com"\n'
+        "export MCP_AUTH_TOKEN='abc123'\n"
+        "PORT=9000 # inline comment\n"
+        "BROKEN LINE\n",
+        encoding="utf-8",
+    )
+    assert parse_env_file(env) == {
+        "SEC_USER_AGENT": "Ola Nordmann ola@example.com",
+        "MCP_AUTH_TOKEN": "abc123",
+        "PORT": "9000",
+    }
+    monkeypatch.delenv("SEC_USER_AGENT", raising=False)
+    monkeypatch.delenv("MCP_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("PORT", "1234")  # real environment wins over .env
+    assert load_env([env, tmp_path / "missing.env"]) == [env.resolve()]
+    import os
+
+    assert os.environ["SEC_USER_AGENT"] == "Ola Nordmann ola@example.com"
+    assert os.environ["MCP_AUTH_TOKEN"] == "abc123"
+    assert os.environ["PORT"] == "1234"

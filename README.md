@@ -53,12 +53,14 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 
-export SEC_USER_AGENT="Ditt Navn din@epost.no"     # Windows PowerShell: $env:SEC_USER_AGENT="Ditt Navn din@epost.no"
+echo 'SEC_USER_AGENT="Ditt Navn din@epost.no"' > .env   # leses automatisk, committes aldri
 pytest -q                          # tester uten nett
 python scripts/smoke_test.py SMCI  # live mot SEC: hvert verktøy skal vise OK
 ```
 
 SEC krever at User-Agent inneholder navn og e-post. Uten dette blir du blokkert.
+Serveren leser `.env` i prosjektmappen selv, så MCP-klienter trenger ikke sende miljøvariabler.
+En ekte miljøvariabel vinner alltid over `.env`.
 
 ## 2. Publiser på Render (gratis, ca. 15 min)
 
