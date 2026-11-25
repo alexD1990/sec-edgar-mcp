@@ -232,6 +232,8 @@ async def run_stage2(client: SecClient, p: Params, run_dir: Path, today: date) -
 
     sheets = run_dir / "sheets"
     sheets.mkdir(exist_ok=True)
+    for old in sheets.glob("*.md"):  # a re-run must not leave sheets from companies that no longer advance
+        old.unlink()
     for rank, m in enumerate(passed, 1):
         (sheets / f"{m['ticker']}.md").write_text(fact_sheet(m, rank, today), encoding="utf-8")
     (run_dir / "stage2_summary.md").write_text(summary_markdown(ranked, passed, today), encoding="utf-8")

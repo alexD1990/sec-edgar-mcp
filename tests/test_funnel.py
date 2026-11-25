@@ -222,7 +222,10 @@ def test_stage1_and_stage2_write_the_run(tmp_path):
             assert [r["ticker"] for r in csv.DictReader(f)] == ["ACME", "SWTH"]   # others fail size/market-cap filters
         assert (run_dir / "params.json").is_file() and (run_dir / "stage1_excluded.json").is_file()
 
+        (run_dir / "sheets").mkdir()
+        (run_dir / "sheets" / "OLD.md").write_text("from an earlier run")
         two = anyio.run(lambda: run_stage2(client, p, run_dir, TODAY))
+        assert not (run_dir / "sheets" / "OLD.md").exists()
         assert two["advance"] == ["ACME"]
         with (run_dir / "stage2.csv").open() as f:
             rows = {r["ticker"]: r for r in csv.DictReader(f)}
