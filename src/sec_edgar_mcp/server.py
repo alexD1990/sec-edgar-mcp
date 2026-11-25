@@ -38,6 +38,11 @@ Typical research flow:
 
 Macro and energy context (needs FRED_API_KEY / EIA_API_KEY in .env):
 - fred_search + fred_series for interest rates, inflation, construction spending and other US macro series.
+  Useful series ids (go straight to fred_series; free-text search on "data center" returns noise):
+  TLPWRCONS power construction spending; PROFCONS private office construction (Census counts
+  data centers here); TTLCONS total construction; DGS10 10-year Treasury; FEDFUNDS policy rate;
+  CPIAUCSL inflation; INDPRO industrial production. Construction series are released ~1st of
+  the month with about a two-month lag.
 - eia_electricity_sales for power demand by state and sector (a proxy for data-center build-out);
   eia_browse + eia_data for any other EIA dataset.
 
@@ -220,7 +225,7 @@ async def search_filings(
 
 @mcp.tool(annotations=READ_ONLY)
 async def fred_search(
-    query: Annotated[str, Field(description="Words describing the series, e.g. 'data center construction spending', '10-year treasury'.")],
+    query: Annotated[str, Field(description="Words describing the series, e.g. 'construction spending power', '10-year treasury'.")],
     limit: Annotated[int, Field(ge=1, le=50)] = 10,
 ) -> dict[str, Any]:
     """Find FRED (St. Louis Fed) data series by keyword. Returns series ids, titles, frequency and how
