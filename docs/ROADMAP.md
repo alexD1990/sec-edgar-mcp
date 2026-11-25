@@ -19,8 +19,8 @@ Andre funn fra samme kjøring:
       kontantstrøm i 10-Q, som nå vises som «årsrader» med fiscal_period Q1-Q3
 
 ## Nye datakilder (fra FPS-analysen)
-- [ ] FRED-modul (renter, byggeaktivitet, makro), gratis API-nøkkel
-- [ ] EIA-modul (strømforbruk, etterspørsel fra datasentre), gratis API-nøkkel
+- [x] FRED-modul (renter, byggeaktivitet, makro), gratis API-nøkkel
+- [x] EIA-modul (strømforbruk, etterspørsel fra datasentre), gratis API-nøkkel
 - [ ] Ferdig verktøy for kundenes capex (hyperskalere) og konkurrentsammenligning
 
 ## v0.2: bedre screening

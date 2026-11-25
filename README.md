@@ -17,6 +17,9 @@ ved å lese dokumentene.
 | `read_filing` | Les et dokument eller én seksjon som ren tekst: risikofaktorer, MD&A, revisorberetning, rettssaker, pressemeldinger |
 | `search_filings` | Fulltekstsøk i alle dokumenter siden 2001, f.eks. `"record backlog"` eller `"material weakness"` |
 | `lookup_company` | Finn ticker, navn og CIK |
+| `fred_search` / `fred_series` | Makrodata fra FRED (renter, inflasjon, byggeaktivitet …) med siste verdi og endring siste år |
+| `eia_electricity_sales` | Strømsalg per delstat og sektor fra EIA, med 12-månedersvekst (indikator for datasenterutbygging) |
+| `eia_browse` / `eia_data` | Utforsk og hent hvilken som helst EIA-datasett |
 
 Det SEC **ikke** har: aksjekurser. P/E og markedsverdi må regnes ut med en kurs fra et annet sted
 (`get_financials` gir antall aksjer).
@@ -57,6 +60,10 @@ echo 'SEC_USER_AGENT="Ditt Navn din@epost.no"' > .env   # leses automatisk, comm
 pytest -q                          # tester uten nett
 python scripts/smoke_test.py SMCI  # live mot SEC: hvert verktøy skal vise OK
 ```
+
+FRED- og EIA-verktøyene trenger gratis API-nøkler i samme `.env`-fil:
+`FRED_API_KEY=...` (fred.stlouisfed.org → My Account → API Keys) og `EIA_API_KEY=...` (eia.gov/opendata).
+Nøklene vises aldri i svar eller feilmeldinger.
 
 SEC krever at User-Agent inneholder navn og e-post. Uten dette blir du blokkert.
 Serveren leser `.env` i prosjektmappen selv, så MCP-klienter trenger ikke sende miljøvariabler.

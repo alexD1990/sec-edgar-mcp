@@ -9,12 +9,14 @@ Each step prints OK or the error, so you can see which tool needs attention.
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 
 import anyio
 
-from sec_edgar_mcp import filings, financials, insiders, screener
+from sec_edgar_mcp import filings, financials, insiders, macro, screener
+from sec_edgar_mcp.apiclient import get_api_client
 from sec_edgar_mcp.companies import resolve_company
 from sec_edgar_mcp.config import load_env
 from sec_edgar_mcp.sec_client import get_client
@@ -73,6 +75,32 @@ async def main(ticker: str) -> None:
     await step("read_filing 8-K", eightk)
     await step("search_filings", search)
     await step("screen_companies", scr)
+
+    print()
+    if os.environ.get("FRED_API_KEY"):
+        async def fred_series():
+            r = await macro.fred_series(get_api_client("fred"), "DGS10")
+            return f"10-year Treasury {r['summary'].get('latest_value')}% on {r['summary'].get('latest_date')}"
+
+        async def fred_search():
+            r = await macro.fred_search(get_api_client("fred"), "data center construction spending", limit=3)
+            return ", ".join(f"{s['id']} ({s['observation_end']})" for s in r["series"]) or "no hits"
+
+        await step("fred_series DGS10", fred_series)
+        await step("fred_search", fred_search)
+    else:
+        print("SKIP FRED: no FRED_API_KEY in environment or .env")
+
+    if os.environ.get("EIA_API_KEY"):
+        async def eia_sales():
+            r = await macro.electricity_sales(get_api_client("eia"), states=["VA", "TX", "US"], months=12)
+            return "; ".join(
+                f"{s['state']} {s.get('latest_month')} TTM {s.get('trailing_12m_yoy_pct')}%" for s in r["states"]
+            )
+
+        await step("eia_electricity_sales", eia_sales)
+    else:
+        print("SKIP EIA: no EIA_API_KEY in environment or .env")
 
 
 if __name__ == "__main__":
