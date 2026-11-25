@@ -17,6 +17,18 @@ Mye av frasorteringen ble gjort manuelt. Disse skal inn i `screen_companies`:
 - [ ] **Innsidesignal**: valgfritt filter «minst X innsidere har kjøpt på åpent marked siste Y dager»
       (FPS: 6 innsidere kjøpte etter 70 % kursfall)
 
+Funn fra første screening med verdsettelse (25.11.2026, 15 treff, 11 forkastet manuelt):
+- [ ] **TTM-EPS på tvers av aksjesplitt/IPO**: avledet Q4 = helårs-EPS minus kvartaler med et annet aksjetall
+      (CLMB 4:1-splitt ga Q4-EPS 3,86 og P/E 8,7, riktig ca. 32; OMDA etter IPO ga Q4-EPS 1,10, riktig ca. 0,09).
+      Avled Q4-EPS fra nettoresultat / utvannede aksjer, eller dropp Q4 når aksjetallet spriker mer enn 1,5x
+- [ ] **Engangsposter i eldre TTM-kvartaler**: sanity-sjekken ser bare siste kvartal. AMSC (skattefordel 118M i
+      Q4 2025, P/E 5,2 mot reelt ca. 45) og QNST (Q2 nettoresultat 50M mot driftsresultat 1M) slapp gjennom.
+      Sjekk alle fire kvartaler (driftsresultat-frames for hvert kvartal) eller sammenlign TTM-EPS med TTM-driftsresultat
+- [ ] **DEF 14A i get_financials**: «pay versus performance»-tabeller i proxy-rapporter blir lest som årstall
+      (QNST: omsetning 112M og bruttomargin 130 %; FRD: årsrad uten omsetning, get_quote ga P/E None).
+      Bruk bare fakta fra 10-K/10-Q/20-F/40-F
+- [ ] Screening: flagg når veksten skyldes oppkjøp (8-K 2.01 siste 12 mnd) eller én kunde (FRD, PLOW, LEGH)
+
 Andre funn fra samme kjøring:
 - [ ] `get_insider_trades`: merke sekundærsalg fra oppkjøpsfond (pris mangler, value_usd vises som 0)
 - [ ] `get_financials`: flagge utdatert `shares_outstanding` (VICR viste tall fra 2015)
