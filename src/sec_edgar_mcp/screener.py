@@ -14,7 +14,7 @@ from typing import Any
 import anyio
 
 from .companies import ticker_map
-from .market import lookup_market
+from .market import lookup_price
 from .sec_client import SecClient, SecError
 
 REVENUE_CONCEPTS = (
@@ -38,6 +38,17 @@ def default_period(today: date | None = None, lag_days: int = 50) -> str:
         if date(cutoff.year, month, day) <= cutoff:
             return f"CY{cutoff.year}Q{quarter}"
     return f"CY{cutoff.year - 1}Q4"
+
+
+def next_quarter_instant(period: str) -> str:
+    """Cover-page share counts are dated after the period ends, so SEC files them under the next quarter."""
+    match = PERIOD_RE.match(period)
+    if not match:
+        raise SecError(f"Period must look like CY2025Q3 (a quarter) or CY2024 (a full year), got '{period}'.")
+    year, quarter = int(match.group(1)), match.group(2)
+    if quarter is None or quarter == "Q4":
+        return f"CY{year + 1}Q1I"
+    return f"CY{year}Q{int(quarter[1]) + 1}I"
 
 
 def previous_year(period: str) -> str:
@@ -86,13 +97,13 @@ async def screen(
     include_otc: bool = False,
     sort_by: str = "revenue_growth",
     limit: int = 50,
-    market: dict[str, dict[str, Any]] | None = None,
+    prices: dict[str, Any] | None = None,
     max_pe: float | None = None,
     min_market_cap_musd: float | None = None,
     max_market_cap_musd: float | None = None,
 ) -> dict[str, Any]:
-    """market: price/market-cap table keyed by ticker (market.market_caps). When given, rows get
-    an annualized P/E and P/S and the valuation filters apply."""
+    """prices: {"date": ..., "prices": {ticker: close}} from market.all_closes. When given, rows get
+    market cap, an annualized P/E and P/S, and the valuation filters apply."""
     period = period or default_period()
     prior = previous_year(period)
     annual_factor = 4 if "Q" in period else 1
@@ -104,12 +115,27 @@ async def screen(
     async def load(key: str, concepts: tuple[str, ...], p: str) -> None:
         frames[key] = await merged_frame(client, concepts, p)
 
+    eps_frame: dict[int, float] = {}
+    share_frames: dict[str, dict[int, dict[str, Any]]] = {}
+
+    async def load_eps(p: str) -> None:
+        for row in await client.frame("EarningsPerShareDiluted", "USD-per-shares", p):
+            eps_frame[row["cik"]] = row["val"]
+
+    async def load_shares(p: str) -> None:
+        rows = await client.frame("EntityCommonStockSharesOutstanding", "shares", p, taxonomy="dei")
+        share_frames[p] = {row["cik"]: row for row in rows}
+
     async with anyio.create_task_group() as tg:
         tg.start_soon(load, "rev", REVENUE_CONCEPTS, period)
         tg.start_soon(load, "rev_prev", REVENUE_CONCEPTS, prior)
         tg.start_soon(load, "ni", NET_INCOME_CONCEPTS, period)
         tg.start_soon(load, "ni_prev", NET_INCOME_CONCEPTS, prior)
         tg.start_soon(load, "gp", GROSS_PROFIT_CONCEPTS, period)
+        if prices is not None:
+            tg.start_soon(load_eps, period)
+            tg.start_soon(load_shares, f"{period}I" if "Q" in period else f"{period}Q4I")
+            tg.start_soon(load_shares, next_quarter_instant(period))
 
     tickers = await ticker_map(client)
     if not frames["rev"]:
@@ -146,28 +172,34 @@ async def screen(
             continue
         prev_ni = frames["ni_prev"].get(cik, {}).get("val")
         valuation: dict[str, Any] = {}
-        if market is not None:
-            quote = lookup_market(market, listing.get("ticker"))
-            cap = (quote or {}).get("market_cap_musd")
-            if cap is None and (max_pe is not None or min_market_cap_musd is not None
-                                or max_market_cap_musd is not None):
+        if prices is not None:
+            price = lookup_price(prices["prices"], listing.get("ticker"))
+            if price is None and (max_pe is not None or min_market_cap_musd is not None
+                                  or max_market_cap_musd is not None):
                 continue
+            share_row = next(  # latest instant first
+                (rows_[cik] for _, rows_ in sorted(share_frames.items(), reverse=True) if cik in rows_), None
+            )
+            shares = share_row["val"] if share_row else None
+            cap = round(price * shares / 1e6, 1) if price and shares else None
             if min_market_cap_musd is not None and (cap is None or cap < min_market_cap_musd):
                 continue
             if max_market_cap_musd is not None and (cap is None or cap > max_market_cap_musd):
                 continue
-            yearly = annual_factor * revenue / 1e6
-            yearly_ni = None if net_income is None else annual_factor * net_income / 1e6
-            pe = round(cap / yearly_ni, 1) if cap and yearly_ni and yearly_ni > 0 else None
+            eps = eps_frame.get(cik)
+            pe = None
+            if price and eps is not None and eps > 0:
+                pe = round(price / (annual_factor * eps), 1)
+            elif cap and net_income and net_income > 0:
+                pe = round(cap / (annual_factor * net_income / 1e6), 1)
             if max_pe is not None and (pe is None or pe > max_pe):
                 continue
+            yearly = annual_factor * revenue / 1e6
             valuation = {
-                "price": (quote or {}).get("price"),
+                "price": price,
                 "market_cap_musd": cap,
                 "pe_annualized": pe,
                 "ps_annualized": round(cap / yearly, 2) if cap and yearly > 0 else None,
-                "sector": (quote or {}).get("sector"),
-                "industry": (quote or {}).get("industry"),
             }
         rows.append({
             "ticker": listing.get("ticker"),
@@ -218,7 +250,8 @@ async def screen(
             "min_market_cap_musd": min_market_cap_musd,
             "max_market_cap_musd": max_market_cap_musd,
         },
-        "with_valuation": market is not None,
+        "with_valuation": prices is not None,
+        "prices_from": None if prices is None else prices.get("date"),
         "companies_with_revenue_data": len(frames["rev"]),
         "matches": len(rows),
         "results": rows[:limit],
@@ -229,11 +262,13 @@ async def screen(
             "Huge growth from a tiny base or one-off items is common: verify with get_financials and the filings.",
         ],
     }
-    if market is None:
+    if prices is None:
         result["notes"].append("No valuation: set with_valuation (or a P/E or market-cap filter) to add it.")
     else:
         result["notes"].append(
-            f"pe_annualized and ps_annualized use {'one quarter x 4' if annual_factor == 4 else 'the full year'} "
-            "and Nasdaq's market cap, which can count only one share class. Rough screen: confirm with get_quote."
+            f"Valuation uses closing prices from {prices.get('date')} and "
+            f"{'one quarter x 4' if annual_factor == 4 else 'the full year'}. pe_annualized uses diluted EPS. "
+            "market_cap_musd counts the share class SEC frames report (one class for Class A/B companies), "
+            "so it can be too low: confirm with get_quote."
         )
     return result

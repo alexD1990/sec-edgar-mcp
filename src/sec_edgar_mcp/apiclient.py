@@ -1,4 +1,4 @@
-"""Small JSON API client for public data APIs (FRED, EIA, Finnhub, Nasdaq).
+"""Small JSON API client for key-based public data APIs (FRED, EIA, Massive, Finnhub).
 
 The API key, when the API needs one, is read from the environment (or .env) on every call and
 is never included in results or error messages.
@@ -123,25 +123,15 @@ CONFIG = {
     "fred": ("FRED", "https://api.stlouisfed.org/fred", "FRED_API_KEY"),
     "eia": ("EIA", "https://api.eia.gov/v2", "EIA_API_KEY"),
     "finnhub": ("Finnhub", "https://finnhub.io/api/v1", "FINNHUB_API_KEY"),
-    "nasdaq": ("Nasdaq", "https://api.nasdaq.com/api", None),
-}
-
-# Nasdaq's public data API answers browsers only; without these headers requests hang.
-NASDAQ_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/130.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Origin": "https://www.nasdaq.com",
-    "Referer": "https://www.nasdaq.com/",
+    "massive": ("Massive", "https://api.massive.com", "MASSIVE_API_KEY"),
 }
 
 
 def get_api_client(which: str) -> JsonApiClient:
     if which not in _clients:
         name, base, env = CONFIG[which]
-        if which == "nasdaq":
-            _clients[which] = JsonApiClient(name, base, env, headers=NASDAQ_HEADERS, max_requests_per_second=3)
+        if which == "massive":  # free plan: 5 requests per minute
+            _clients[which] = JsonApiClient(name, base, env, key_param="apiKey", max_requests_per_second=5 / 60)
         elif which == "finnhub":
             _clients[which] = JsonApiClient(name, base, env, key_param="token", max_requests_per_second=1)
         else:

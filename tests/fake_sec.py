@@ -70,6 +70,19 @@ FRAMES = {
         row(SWITCHER, "Switcher Tag Holdings", -2e6, end="2025-09-30"),
     ]),
     ("GrossProfit", "CY2026Q3"): frame([row(ACME, "Acme Robotics Inc.", 120e6)]),
+    # Used by the screener's valuation
+    ("EarningsPerShareDiluted", "CY2026Q3"): frame([
+        row(ACME, "Acme Robotics Inc.", 0.60),
+        row(SWITCHER, "Switcher Tag Holdings", 0.24),
+    ]),
+    # Cover-page share counts are dated after quarter end, so most land in the next quarter's frame
+    ("EntityCommonStockSharesOutstanding", "CY2026Q4I"): frame([
+        row(ACME, "Acme Robotics Inc.", 50e6, end="2026-10-31"),
+    ]),
+    ("EntityCommonStockSharesOutstanding", "CY2026Q3I"): frame([
+        row(ACME, "Acme Robotics Inc.", 45e6, end="2026-07-31"),  # older count: must lose
+        row(SWITCHER, "Switcher Tag Holdings", 50e6),
+    ]),
 }
 
 

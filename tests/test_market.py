@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import anyio
 import httpx2
@@ -12,7 +12,8 @@ from sec_edgar_mcp import market, screener
 from sec_edgar_mcp.apiclient import ApiError, JsonApiClient
 from sec_edgar_mcp.sec_client import SecClient, set_client
 
-SECRET = "finnhubsecret999"
+MASSIVE_KEY = "massivesecret123"
+FINNHUB_KEY = "finnhubsecret999"
 
 
 def run(fn, *args, **kwargs):
@@ -23,76 +24,58 @@ def ok(payload, status=200):
     return httpx2.Response(status, content=json.dumps(payload).encode(), headers={"content-type": "application/json"})
 
 
-def nasdaq_ok(data):
-    return ok({"data": data, "message": None, "status": {"rCode": 200, "bCodeMessage": None}})
+# ------------------------------------------------------------------ fake Massive
 
-
-# ------------------------------------------------------------------ fake Nasdaq
-
-def history_rows(today: date, n: int = 300):
-    rows, day, price = [], today, 30.0
-    while len(rows) < n:
+def bars(last_day: date, n: int = 300):
+    out, day, price = [], last_day, 30.0
+    while len(out) < n:
         if day.weekday() < 5:
-            rows.append({"date": day.strftime("%m/%d/%Y"), "close": f"${price:,.2f}", "volume": "1,000,000",
-                         "open": "$1", "high": f"${price * 1.01:,.2f}", "low": f"${price * 0.99:,.2f}"})
+            ms = int(datetime(day.year, day.month, day.day, 4, tzinfo=timezone.utc).timestamp() * 1000)
+            out.append({"t": ms, "o": price, "h": price * 1.01, "l": price * 0.99, "c": price, "v": 1_000_000})
             price = price / 1.002  # walking back in time: prices were lower before
         day -= timedelta(days=1)
-    rows[150]["close"], rows[150]["high"] = "$60.00", "$66.00"  # the peak
-    return rows
+    out[150]["c"], out[150]["h"] = 60.0, 66.0  # the peak
+    return out[::-1]
 
 
-def nasdaq_handler(request: httpx2.Request) -> httpx2.Response:
+def massive_handler(request: httpx2.Request) -> httpx2.Response:
+    if request.url.params.get("apiKey") != MASSIVE_KEY:
+        return ok({"status": "ERROR", "error": f"Unknown API Key {request.url.params.get('apiKey')}"}, 401)
     path = request.url.path
-    if "User-Agent" not in request.headers or "Mozilla" not in request.headers["User-Agent"]:
-        return httpx2.Response(403)
-    if path.endswith("/quote/BLOCKED/info") or path.endswith("/quote/BLOCKED/summary"):
-        return ok({"data": None, "status": {"rCode": 400, "bCodeMessage": [{"code": 1001, "errorMessage": "Symbol not exists"}]}})
-    if path.endswith("/quote/UPCO/info"):
-        return nasdaq_ok({"symbol": "UPCO", "companyName": "Up-C Holdings Class A", "marketStatus": "Closed",
-                          "primaryData": {"lastSalePrice": "$20.00", "percentageChange": "-1.5%",
-                                          "lastTradeTimestamp": "Nov 24, 2026", "isRealTime": False},
-                          "keyStats": {"fiftyTwoWeekHighLow": {"label": "52 Week Range:", "value": "12.50 - 66.00"}}})
-    if path.endswith("/quote/UPCO/summary"):
-        return nasdaq_ok({"summaryData": {
-            "MarketCap": {"label": "Market Cap", "value": "2,000,000,000"},  # Class A only
-            "PERatio": {"label": "P/E Ratio", "value": 25.0},
-            "OneYrTarget": {"label": "1 Year Target", "value": "$40.00"},
-            "AverageVolume": {"label": "Average Volume", "value": "3,000,000"},
-            "Sector": {"label": "Sector", "value": "Industrials"},
-        }})
-    if path.endswith("/quote/UPCO/historical"):
-        return nasdaq_ok({"symbol": "UPCO", "tradesTable": {"rows": history_rows(date(2026, 11, 24))}})
-    if path.endswith("/screener/stocks"):
-        assert request.url.params["download"] == "true"
-        return nasdaq_ok({"rows": [
-            {"symbol": "ACME", "lastsale": "$48.00", "marketCap": "2400000000.00", "sector": "Technology"},
-            {"symbol": "SWTH", "lastsale": "$9.60", "marketCap": "480000000.00", "sector": "Industrials"},
-            {"symbol": "SHRK", "lastsale": "$1.00", "marketCap": "", "sector": ""},
+    if path.startswith("/v2/aggs/ticker/UPCO/range/1/day/"):
+        start, end = path.split("/")[-2:]
+        rows = [b for b in bars(date(2026, 11, 24))
+                if start <= datetime.fromtimestamp(b["t"] / 1000, tz=timezone.utc).date().isoformat() <= end]
+        return ok({"ticker": "UPCO", "status": "OK", "resultsCount": len(rows), "results": rows})
+    if path.startswith("/v2/aggs/ticker/"):
+        return ok({"ticker": "X", "status": "OK", "resultsCount": 0})
+    if path == "/v2/aggs/grouped/locale/us/market/stocks/2026-11-24":
+        return ok({"status": "NOT_AUTHORIZED", "message": "Attempted to request today's data before end of day."}, 403)
+    if path == "/v2/aggs/grouped/locale/us/market/stocks/2026-11-23":
+        return ok({"status": "OK", "resultsCount": 3, "results": [
+            {"T": "ACME", "c": 48.0}, {"T": "SWTH", "c": 9.6}, {"T": "SHRK", "c": 1.0},
         ]})
     return httpx2.Response(404)
 
 
 def finnhub_handler(request: httpx2.Request) -> httpx2.Response:
-    if request.url.params.get("token") != SECRET:
+    if request.url.params.get("token") != FINNHUB_KEY:
         return ok({"error": f"Invalid API key {request.url.params.get('token')}"}, 401)
-    return ok({"c": 19.5, "d": -0.3, "dp": -1.5, "h": 20, "l": 19, "o": 19.8, "pc": 19.8, "t": 1795651200})
+    return ok({"c": 31.5, "d": 1.5, "dp": 5.0, "h": 32, "l": 30, "o": 30, "pc": 30.0, "t": 1795651200})
 
 
 @pytest.fixture
-def nasdaq():
-    return JsonApiClient("Nasdaq", "https://api.nasdaq.com/api", None, headers=market_headers(),
-                         max_requests_per_second=1000, transport=httpx2.MockTransport(nasdaq_handler))
+def massive(monkeypatch):
+    monkeypatch.setenv("MASSIVE_API_KEY", MASSIVE_KEY)
+    monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
+    return JsonApiClient("Massive", "https://api.massive.com", "MASSIVE_API_KEY", key_param="apiKey",
+                         max_requests_per_second=1000, transport=httpx2.MockTransport(massive_handler))
 
 
 @pytest.fixture
 def finnhub():
     return JsonApiClient("Finnhub", "https://finnhub.io/api/v1", "FINNHUB_API_KEY", key_param="token",
                          max_requests_per_second=1000, transport=httpx2.MockTransport(finnhub_handler))
-
-
-def market_headers():
-    from sec_edgar_mcp.apiclient import NASDAQ_HEADERS
-    return NASDAQ_HEADERS
 
 
 # ------------------------------------------------------------------ fake SEC facts for an Up-C company
@@ -139,14 +122,9 @@ UPCO_FACTS = {
 
 # ------------------------------------------------------------------ tests
 
-def test_number_parsing():
-    assert market.num("$1,234.50") == 1234.5
-    assert market.num("-2.3%") == -2.3
-    assert market.num("N/A") is None
-    assert market.num("") is None
-    assert market.num_range("$66.00/$12.50") == (12.5, 66.0)
-    assert market.num_range("12.50 - 66.00") == (12.5, 66.0)
-    assert market.nasdaq_symbol("BRK-B") == "BRK.B"
+def test_symbols():
+    assert market.massive_symbol("BRK-B") == "BRK.B"
+    assert market.lookup_price({"BRK-B": 1.0}, "BRK.B") == 1.0
 
 
 def test_share_classes_are_summed_from_the_latest_cover_page():
@@ -156,20 +134,43 @@ def test_share_classes_are_summed_from_the_latest_cover_page():
     assert shares["as_of"] == "2026-10-31"
 
 
-def test_quote_and_valuation_for_up_c(nasdaq):
-    quote = run(market.nasdaq_quote, nasdaq, "UPCO")
-    assert quote["price"] == 20.0
-    assert (quote["week52_low"], quote["week52_high"]) == (12.5, 66.0)
-    assert quote["market_cap_nasdaq_musd"] == 2000.0
-    assert quote["analyst_target_1y"] == 40.0
+def test_quote_and_valuation_for_up_c(massive, finnhub):
+    quote = run(market.best_quote, massive, finnhub, "UPCO", today=date(2026, 11, 25))
+    assert quote["price"] == 30.0 and quote["price_time"] == "2026-11-24 close"
+    assert quote["week52_high"] == 66.0
+    assert quote["below_52w_high_pct"] == round(100 * (30 / 66 - 1), 1)
 
     val = market.valuation(quote, UPCO_FACTS)
-    assert val["market_cap_musd"] == 2600.0           # 130M shares, both classes
+    assert val["market_cap_musd"] == 3900.0           # 130M shares x $30, both classes
     assert val["trailing_12m"]["eps_diluted"] == 0.7
-    assert val["pe_ttm"] == round(20 / 0.7, 1)        # price over reported diluted EPS
-    assert val["ps_ttm"] == round(2600 / 1000, 1)
-    assert any("differs from Nasdaq" in n for n in val["notes"])
+    assert val["pe_ttm"] == round(30 / 0.7, 1)        # price over reported diluted EPS
+    assert val["ps_ttm"] == round(3900 / 1000, 1)
     assert any("2 share classes" in n for n in val["notes"])
+
+
+def test_finnhub_adds_real_time_price(massive, finnhub, monkeypatch):
+    monkeypatch.setenv("FINNHUB_API_KEY", FINNHUB_KEY)
+    quote = run(market.best_quote, massive, finnhub, "UPCO", today=date(2026, 11, 25))
+    assert quote["price"] == 31.5 and quote["price_source"] == "Finnhub (real time)"
+    assert quote["week52_high"] == 66.0                # range still from Massive
+
+
+def test_missing_keys_and_keys_never_leak(massive, finnhub, monkeypatch):
+    monkeypatch.delenv("MASSIVE_API_KEY")
+    with pytest.raises(ApiError) as err:
+        run(market.best_quote, massive, finnhub, "UPCO")
+    assert "MASSIVE_API_KEY" in str(err.value)
+
+    monkeypatch.setenv("MASSIVE_API_KEY", "wrong-" + MASSIVE_KEY)
+    with pytest.raises(ApiError) as err:
+        run(market.best_quote, massive, finnhub, "UPCO")
+    assert MASSIVE_KEY not in str(err.value)
+
+
+def test_unknown_ticker(massive, finnhub):
+    with pytest.raises(ApiError) as err:
+        run(market.best_quote, massive, finnhub, "NOPE", today=date(2026, 11, 25))
+    assert "no daily prices" in str(err.value)
 
 
 def test_missing_quarter_gives_no_trailing_figures():
@@ -178,25 +179,8 @@ def test_missing_quarter_gives_no_trailing_figures():
     assert market.trailing_four_quarters(rows) is None
 
 
-def test_finnhub_fallback_and_key_never_leaks(nasdaq, finnhub, monkeypatch):
-    monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
-    with pytest.raises(ApiError) as err:
-        run(market.best_quote, nasdaq, finnhub, "BLOCKED")
-    assert "Symbol not exists" in str(err.value) and "FINNHUB_API_KEY" in str(err.value)
-
-    monkeypatch.setenv("FINNHUB_API_KEY", SECRET)
-    quote = run(market.best_quote, nasdaq, finnhub, "BLOCKED")
-    assert quote["price"] == 19.5 and "nasdaq_error" in quote
-
-    monkeypatch.setenv("FINNHUB_API_KEY", "wrong-" + SECRET)
-    finnhub._cache.clear()
-    with pytest.raises(ApiError) as err:
-        run(market.best_quote, nasdaq, finnhub, "BLOCKED")
-    assert SECRET not in str(err.value)
-
-
-def test_price_history_statistics(nasdaq):
-    hist = run(market.price_history, nasdaq, "UPCO", days=500, max_points=40, today=date(2026, 11, 24))
+def test_price_history_statistics(massive):
+    hist = run(market.price_history, massive, "UPCO", days=500, max_points=40, today=date(2026, 11, 25))
     assert hist["trading_days"] == 300
     assert hist["to"] == "2026-11-24" and hist["last_close"] == 30.0
     assert hist["high"]["price"] == 66.0
@@ -206,23 +190,37 @@ def test_price_history_statistics(nasdaq):
     assert hist["annualized_volatility_pct"] > 0
 
 
-def test_screen_with_valuation(nasdaq):
+def test_all_closes_steps_back_to_a_released_day(massive):
+    closes = run(market.all_closes, massive, today=date(2026, 11, 25))
+    assert closes["date"] == "2026-11-23"              # 11-24 not released yet on the free plan
+    assert closes["prices"]["ACME"] == 48.0
+
+
+def test_next_quarter_instant():
+    assert screener.next_quarter_instant("CY2026Q3") == "CY2026Q4I"
+    assert screener.next_quarter_instant("CY2026Q4") == "CY2027Q1I"
+    assert screener.next_quarter_instant("CY2025") == "CY2026Q1I"
+
+
+def test_screen_with_valuation(massive):
     client = SecClient("Test Runner test@example.com", max_requests_per_second=1000, transport=transport())
     set_client(client)
     try:
-        caps = run(market.market_caps, nasdaq)
-        assert caps["ACME"]["market_cap_musd"] == 2400.0 and caps["SHRK"]["market_cap_musd"] is None
+        prices = run(market.all_closes, massive, today=date(2026, 11, 25))
 
-        result = run(screener.screen, client, period="CY2026Q3", market=caps, sort_by="pe")
+        result = run(screener.screen, client, period="CY2026Q3", prices=prices, sort_by="pe")
         by_ticker = {r["ticker"]: r for r in result["results"]}
-        assert by_ticker["ACME"]["pe_annualized"] == 20.0      # 2400 / (30 x 4)
-        assert by_ticker["SWTH"]["pe_annualized"] == 10.0      # 480 / (12 x 4)
+        assert by_ticker["ACME"]["market_cap_musd"] == 2400.0   # newest share count (50M) x $48
+        assert by_ticker["ACME"]["pe_annualized"] == 20.0       # 48 / (0.60 x 4)
+        assert by_ticker["SWTH"]["market_cap_musd"] == 480.0    # count from the Q3 frame
+        assert by_ticker["SWTH"]["pe_annualized"] == 10.0       # 9.6 / (0.24 x 4)
         assert [r["ticker"] for r in result["results"]][:2] == ["SWTH", "ACME"]  # cheapest first
+        assert result["prices_from"] == "2026-11-23"
 
-        cheap = run(screener.screen, client, period="CY2026Q3", market=caps, max_pe=15)
+        cheap = run(screener.screen, client, period="CY2026Q3", prices=prices, max_pe=15)
         assert [r["ticker"] for r in cheap["results"]] == ["SWTH"]
 
-        small = run(screener.screen, client, period="CY2026Q3", market=caps, max_market_cap_musd=1000)
+        small = run(screener.screen, client, period="CY2026Q3", prices=prices, max_market_cap_musd=1000)
         assert [r["ticker"] for r in small["results"]] == ["SWTH"]
 
         plain = run(screener.screen, client, period="CY2026Q3")

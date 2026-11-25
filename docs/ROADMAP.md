@@ -36,11 +36,13 @@ Andre funn fra samme kjøring:
 - [ ] Varelager og kundefordringer som vokser raskere enn omsetningen
 
 ## v0.4: verdsettelse
-- [x] Kurs fra ekstern kilde (Nasdaq uten nøkkel, Finnhub som reserve): `get_quote`, `get_price_history`
+- [x] Kurs fra ekstern kilde (Massive gratisplan, sluttkurs; Finnhub for sanntid): `get_quote`, `get_price_history`
+  (Nasdaqs uoffisielle API ble prøvd og blokkerer med 403 «Access Denied»)
 - [x] P/E, P/S og P/FCF på siste fire kvartaler, markedsverdi med alle aksjeklasser
 - [x] Verdsettelse i `screen_companies` (`max_pe`, markedsverdifilter, sortering på P/E)
 - [ ] EV (netto gjeld) og PEG i `get_quote`
-- [ ] Screeningens P/E bruker Nasdaqs markedsverdi (kan telle én aksjeklasse): bytte til SEC-aksjetall for treffene
+- [ ] Screeningens markedsverdi bruker SEC-frames (én aksjeklasse for A/B-selskaper): summere klasser for treffene
+- [ ] Analytikermål og analytikerdekning (Finnhub `recommendation`)
 - [ ] Analytikerdekning som mål på hvor «under radaren» et selskap er
 
 ## Drift
