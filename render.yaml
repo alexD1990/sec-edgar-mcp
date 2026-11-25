@@ -1,0 +1,12 @@
+# Render Blueprint: New > Blueprint > pick this repo.
+services:
+  - type: web
+    name: sec-edgar-mcp
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: SEC_USER_AGENT
+        sync: false # you type this in during setup, e.g. "Ola Nordmann ola@example.com"
+      - key: MCP_AUTH_TOKEN
+        generateValue: true # Render creates a random secret; copy it into the Claude connector
