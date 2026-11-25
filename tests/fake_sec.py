@@ -10,6 +10,8 @@ ACME = 1000001
 OTC_CO = 1000002
 SHRINK = 1000003
 SWITCHER = 1000004
+TINY = 1000005
+LAST_SEARCH_PARAMS: dict = {}
 
 TICKERS = {
     "fields": ["cik", "name", "ticker", "exchange"],
@@ -19,6 +21,7 @@ TICKERS = {
         [OTC_CO, "Tiny Pink Sheet Corp", "TPSC", "OTC"],
         [SHRINK, "Shrinking Widgets Co", "SHRK", "NYSE"],
         [SWITCHER, "Switcher Tag Holdings", "SWTH", "NYSE"],
+        [TINY, "Tiny Base Biotech", "TINY", "Nasdaq"],
     ],
 }
 
@@ -37,12 +40,14 @@ FRAMES = {
         row(OTC_CO, "Tiny Pink Sheet Corp", 90e6),
         row(SHRINK, "Shrinking Widgets Co", 50e6),
         row(9999999, "Unlisted Fund LP", 500e6),
+        row(TINY, "Tiny Base Biotech", 50e6),  # one-off licence fee
     ]),
     ("Revenues", "CY2025Q3"): frame([
         row(ACME, "Acme Robotics Inc.", 150e6, end="2025-09-30"),
         row(OTC_CO, "Tiny Pink Sheet Corp", 30e6, end="2025-09-30"),
         row(SHRINK, "Shrinking Widgets Co", 80e6, end="2025-09-30"),
         row(9999999, "Unlisted Fund LP", 100e6, end="2025-09-30"),
+        row(TINY, "Tiny Base Biotech", 1e6, end="2025-09-30"),
     ]),
     # Switcher only uses the ASC 606 tag
     ("RevenueFromContractWithCustomerExcludingAssessedTax", "CY2026Q3"): frame([
@@ -58,6 +63,7 @@ FRAMES = {
         row(SHRINK, "Shrinking Widgets Co", 1e6),
         row(SWITCHER, "Switcher Tag Holdings", 12e6),
         row(9999999, "Unlisted Fund LP", 50e6),
+        row(TINY, "Tiny Base Biotech", 40e6),
     ]),
     ("NetIncomeLoss", "CY2025Q3"): frame([
         row(ACME, "Acme Robotics Inc.", 10e6, end="2025-09-30"),
@@ -208,6 +214,13 @@ weakness, Acme has not maintained effective internal control. """ + ("Control de
 
 EIGHT_K_HTML = "<html><body><p>Item 2.02 Results of Operations. See Exhibit 99.1.</p></body></html>"
 EX99_HTML = "<html><body><p>Acme reports record revenue of $300 million, up 100% year over year.</p></body></html>"
+EIGHT_K_INDEX_PAGE = """<?xml version="1.0"?><html><body>
+<table class="tableFile" summary="Document Format Files">
+<tr><th>Seq</th><th>Description</th><th>Document</th><th>Type</th><th>Size</th></tr>
+<tr><td>1</td><td>8-K</td><td><a href="/ix?doc=/Archives/edgar/data/1000001/000126000046/acme-8k.htm">acme-8k.htm</a></td><td>8-K</td><td>30000</td></tr>
+<tr><td>2</td><td>PRESS RELEASE</td><td><a href="/Archives/edgar/data/1000001/000126000046/q3fy26results.htm">q3fy26results.htm</a></td><td>EX-99.1</td><td>90000</td></tr>
+<tr><td>3</td><td>GRAPHIC</td><td><a href="/Archives/edgar/data/1000001/000126000046/logo.jpg">logo.jpg</a></td><td>GRAPHIC</td><td>5000</td></tr>
+</table></body></html>"""
 EIGHT_K_INDEX = {"directory": {"name": "/Archives/edgar/data/1000001/000126000046", "item": [
     {"name": "acme-8k.htm", "type": "text.gif"},
     {"name": "acme-ex991.htm", "type": "text.gif"},
@@ -253,11 +266,15 @@ def handler(request: httpx2.Request) -> httpx2.Response:
             return ok(TEN_K_HTML)
         if filename == "acme-8k.htm":
             return ok(EIGHT_K_HTML)
-        if filename == "acme-ex991.htm":
+        if filename in ("acme-ex991.htm", "q3fy26results.htm"):
             return ok(EX99_HTML)
+        if filename == "0001-26-000046-index.htm":
+            return ok(EIGHT_K_INDEX_PAGE)
         if filename == "index.json":
             return ok(EIGHT_K_INDEX)
     if "efts.sec.gov" in url and path.endswith("/search-index"):
+        LAST_SEARCH_PARAMS.clear()
+        LAST_SEARCH_PARAMS.update(dict(request.url.params))
         return ok(SEARCH)
     return httpx2.Response(404)
 

@@ -77,6 +77,7 @@ async def screen(
     min_revenue_growth_pct: float = 25.0,
     min_revenue_musd: float = 20.0,
     max_revenue_musd: float | None = None,
+    min_prev_revenue_musd: float = 10.0,
     require_profitable: bool = True,
     min_net_margin_pct: float | None = None,
     min_gross_margin_pct: float | None = None,
@@ -113,7 +114,9 @@ async def screen(
         if max_revenue_musd is not None and revenue > max_revenue_musd * 1e6:
             continue
         prev_row = frames["rev_prev"].get(cik)
-        growth = _growth(revenue, prev_row["val"] if prev_row else None)
+        if prev_row is None or prev_row["val"] < min_prev_revenue_musd * 1e6:
+            continue  # growth from a tiny base (e.g. a one-off licence fee) is noise
+        growth = _growth(revenue, prev_row["val"])
         if growth is None or growth < min_revenue_growth_pct:
             continue
         net_income = frames["ni"].get(cik, {}).get("val")
@@ -166,6 +169,7 @@ async def screen(
             "min_revenue_growth_pct": min_revenue_growth_pct,
             "min_revenue_musd": min_revenue_musd,
             "max_revenue_musd": max_revenue_musd,
+            "min_prev_revenue_musd": min_prev_revenue_musd,
             "require_profitable": require_profitable,
             "min_net_margin_pct": min_net_margin_pct,
             "min_gross_margin_pct": min_gross_margin_pct,

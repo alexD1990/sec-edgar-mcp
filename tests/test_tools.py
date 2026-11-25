@@ -7,6 +7,7 @@ import anyio
 import httpx2
 import pytest
 
+import fake_sec
 from fake_sec import ACME, OTC_CO, SHRINK, SWITCHER, transport
 from sec_edgar_mcp import filings, financials, insiders, screener
 from sec_edgar_mcp.sec_client import SecClient, SecError, set_client
@@ -68,6 +69,11 @@ def test_screen_filters_and_tag_fallback(client):
 
     capped = run(screener.screen, client, period="CY2026Q3", max_revenue_musd=200)
     assert [r["ticker"] for r in capped["results"]] == ["SWTH"]
+
+    # +4900% from a $1m base is excluded by default, allowed when asked for
+    assert "TINY" not in tickers
+    tiny_ok = run(screener.screen, client, period="CY2026Q3", min_prev_revenue_musd=0)
+    assert tiny_ok["results"][0]["ticker"] == "TINY"
 
 
 def test_screen_missing_period(client):
@@ -159,7 +165,15 @@ def test_read_10k_sections(client):
 def test_read_8k_includes_press_release(client):
     result = run(filings.read_filing, client, ACME, form="8-K")
     assert "record revenue of $300 million" in result["text"]
-    assert any("ex991" in d for d in result["documents"])
+    # found through the index page's EX-99.1 type, not the file name
+    assert any(d.endswith("q3fy26results.htm") for d in result["documents"])
+    assert len(result["documents"]) == 2
+
+
+def test_parse_index_page_handles_ix_links():
+    docs = filings.parse_index_page(fake_sec.EIGHT_K_INDEX_PAGE)
+    assert [(d["name"], d["type"]) for d in docs] == [
+        ("acme-8k.htm", "8-K"), ("q3fy26results.htm", "EX-99.1"), ("logo.jpg", "GRAPHIC")]
 
 
 def test_list_filings_filter(client):
@@ -172,6 +186,9 @@ def test_list_filings_filter(client):
 def test_full_text_search(client):
     result = run(filings.full_text_search, client, '"record revenue"', forms=["8-K"], start_date="2026-01-01")
     assert result["total_hits"] == 2
+    params = fake_sec.LAST_SEARCH_PARAMS
+    assert params["dateRange"] == "custom" and params["startdt"] == "2026-01-01" and params["enddt"]
+    assert params["forms"] == "8-K" and params["category"] == "custom"
     first = result["results"][0]
     assert first["company"] == "Acme Robotics Inc."
     assert first["tickers"] == "ACME, ACME-W"

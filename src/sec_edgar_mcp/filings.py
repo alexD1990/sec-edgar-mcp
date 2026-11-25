@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import re
+import warnings
 from collections import OrderedDict
+from datetime import date
 from typing import Any
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 from .sec_client import SecClient, SecError, archive_url
+
+
+def _soup(html: str) -> BeautifulSoup:
+    # Inline-XBRL filings are XHTML; the lenient HTML parser handles them fine, so skip bs4's warning.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", XMLParsedAsHTMLWarning)
+        return BeautifulSoup(html, "lxml")
+
 
 # ---------------------------------------------------------------- filing lists
 
@@ -57,7 +67,7 @@ BLOCK_TAGS = ["p", "div", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6", "table
 
 
 def html_to_text(html: str) -> str:
-    soup = BeautifulSoup(html, "lxml")
+    soup = _soup(html)
     for tag in soup(["script", "style", "head", "title"]):
         tag.decompose()
     for tag in soup.find_all(style=re.compile(r"display\s*:\s*none", re.I)):
@@ -170,7 +180,47 @@ def available_sections(form: str) -> list[str]:
 
 # ---------------------------------------------------------------- read a filing
 
-EXHIBIT_RE = re.compile(r"ex[-_]?99", re.I)
+EXHIBIT_NAME_RE = re.compile(r"ex[a-z]*[-_.]?99|press|release|earnings", re.I)
+
+
+def parse_index_page(html: str) -> list[dict[str, str]]:
+    """Documents listed on a filing's -index.htm page: name, type (e.g. EX-99.1), description."""
+    soup = _soup(html)
+    docs = []
+    for table in soup.find_all("table", class_="tableFile"):
+        for tr in table.find_all("tr"):
+            cells = tr.find_all("td")
+            if len(cells) < 4:
+                continue
+            link = cells[2].find("a")
+            if link is None or not link.get("href"):
+                continue
+            name = link["href"].split("?doc=")[-1].rsplit("/", 1)[-1]
+            docs.append({
+                "name": name,
+                "type": cells[3].get_text(strip=True),
+                "description": cells[1].get_text(" ", strip=True),
+            })
+    return docs
+
+
+async def exhibit_99_documents(client: SecClient, cik: int, accession: str) -> list[str]:
+    """Press releases and other EX-99 exhibits of an 8-K."""
+    try:
+        page = await client.archive_text(cik, accession, f"{accession}-index.htm")
+        docs = parse_index_page(page)
+        names = [d["name"] for d in docs if d["type"].upper().startswith("EX-99")]
+        if docs:
+            return [n for n in names if n.lower().endswith((".htm", ".html", ".txt"))]
+    except SecError:
+        pass
+    index = await client.filing_index(cik, accession)
+    return [
+        item["name"]
+        for item in index.get("directory", {}).get("item", [])
+        if EXHIBIT_NAME_RE.search(item.get("name", ""))
+        and item.get("name", "").lower().endswith((".htm", ".html", ".txt"))
+    ]
 
 
 async def read_filing(
@@ -207,12 +257,11 @@ async def read_filing(
         documents.append(archive_url(cik, match["accession"], match["primary_document"]))
         parts.append(main)
     if form_type.upper() in ("8-K", "8-K/A", "6-K") and section in ("full", "exhibits"):
-        index = await client.filing_index(cik, match["accession"])
-        for item in index.get("directory", {}).get("item", []):
-            name = item.get("name", "")
-            if EXHIBIT_RE.search(name) and name.lower().endswith((".htm", ".html", ".txt")):
-                parts.append(f"===== Exhibit: {name} =====\n" + await document_text(client, cik, match["accession"], name))
-                documents.append(archive_url(cik, match["accession"], name))
+        for name in await exhibit_99_documents(client, cik, match["accession"]):
+            if name == match["primary_document"]:
+                continue
+            parts.append(f"===== Exhibit: {name} =====\n" + await document_text(client, cik, match["accession"], name))
+            documents.append(archive_url(cik, match["accession"], name))
 
     text = "\n\n".join(parts)
     if section not in ("full", "exhibits"):
@@ -258,18 +307,20 @@ async def full_text_search(
 ) -> dict[str, Any]:
     params: dict[str, Any] = {"q": query}
     if forms:
-        params["forms"] = ",".join(forms)
+        params["category"] = "custom"
+        params["forms"] = ",".join(f.upper() for f in forms)
     if start_date or end_date:
+        # EDGAR only applies a date filter when both ends are present.
         params["dateRange"] = "custom"
-        if start_date:
-            params["startdt"] = start_date
-        if end_date:
-            params["enddt"] = end_date
+        params["startdt"] = start_date or "2001-01-01"
+        params["enddt"] = end_date or date.today().isoformat()
     if page:
         params["from"] = page * 100
     data = await client.full_text_search(params)
     hits = data.get("hits", {})
-    total = hits.get("total", {}).get("value")
+    total_info = hits.get("total", {})
+    total = total_info.get("value")
+    capped = total_info.get("relation") == "gte"
 
     results, companies = [], {}
     for hit in hits.get("hits", []):
@@ -298,10 +349,15 @@ async def full_text_search(
 
     return {
         "query": query,
-        "total_hits": total,
+        "total_hits": f"{total}+" if capped else total,
+        "date_range": [params.get("startdt"), params.get("enddt")] if "startdt" in params else None,
+        "forms": params.get("forms"),
         "page": page,
         "hits_on_page": len(results),
         "companies": sorted(companies.values(), key=lambda c: c["hits"], reverse=True),
         "results": results,
-        "notes": ['Use double quotes for exact phrases, e.g. "record backlog". Covers filings since 2001.'],
+        "notes": [
+            'Use double quotes for exact phrases, e.g. "record backlog". Covers filings since 2001.',
+            "The per-company counts cover this page of results only (100 hits per page).",
+        ],
     }

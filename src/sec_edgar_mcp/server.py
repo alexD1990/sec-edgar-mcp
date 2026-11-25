@@ -67,6 +67,9 @@ async def screen_companies(
     min_revenue_growth_pct: Annotated[float, Field(description="Minimum revenue growth vs. same period a year earlier, in %.")] = 25.0,
     min_revenue_musd: Annotated[float, Field(description="Minimum revenue in the period, USD millions.")] = 20.0,
     max_revenue_musd: Annotated[float | None, Field(description="Maximum revenue in the period, USD millions (use to stay in small caps).")] = None,
+    min_prev_revenue_musd: Annotated[
+        float, Field(description="Minimum revenue in the comparison period, USD millions. Filters out huge % growth from a tiny base.")
+    ] = 10.0,
     require_profitable: Annotated[bool, Field(description="Only companies with positive net income in the period.")] = True,
     min_net_margin_pct: Annotated[float | None, Field(description="Minimum net margin in %.")] = None,
     min_gross_margin_pct: Annotated[float | None, Field(description="Minimum gross margin in %.")] = None,
@@ -86,6 +89,7 @@ async def screen_companies(
         min_revenue_growth_pct=min_revenue_growth_pct,
         min_revenue_musd=min_revenue_musd,
         max_revenue_musd=max_revenue_musd,
+        min_prev_revenue_musd=min_prev_revenue_musd,
         require_profitable=require_profitable,
         min_net_margin_pct=min_net_margin_pct,
         min_gross_margin_pct=min_gross_margin_pct,
