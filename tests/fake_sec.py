@@ -12,6 +12,7 @@ SHRINK = 1000003
 SWITCHER = 1000004
 TINY = 1000005
 GAIN = 1000006
+INSURER = 1000007
 LAST_SEARCH_PARAMS: dict = {}
 
 TICKERS = {
@@ -24,6 +25,7 @@ TICKERS = {
         [SWITCHER, "Switcher Tag Holdings", "SWTH", "NYSE"],
         [TINY, "Tiny Base Biotech", "TINY", "Nasdaq"],
         [GAIN, "Gain On Debt Corp", "GAIN", "NYSE"],
+        [INSURER, "Growth Insurance Holdings", "GINS", "NYSE"],
     ],
 }
 
@@ -44,6 +46,7 @@ FRAMES = {
         row(9999999, "Unlisted Fund LP", 500e6),
         row(TINY, "Tiny Base Biotech", 50e6),  # one-off licence fee
         row(GAIN, "Gain On Debt Corp", 100e6),
+        row(INSURER, "Growth Insurance Holdings", 180e6),
     ]),
     ("Revenues", "CY2025Q3"): frame([
         row(ACME, "Acme Robotics Inc.", 150e6, end="2025-09-30"),
@@ -52,6 +55,7 @@ FRAMES = {
         row(9999999, "Unlisted Fund LP", 100e6, end="2025-09-30"),
         row(TINY, "Tiny Base Biotech", 1e6, end="2025-09-30"),
         row(GAIN, "Gain On Debt Corp", 60e6, end="2025-09-30"),
+        row(INSURER, "Growth Insurance Holdings", 100e6, end="2025-09-30"),
     ]),
     # Operating income: GAIN loses money in the business; its profit is a gain on debt (like NFE/EOSE)
     ("OperatingIncomeLoss", "CY2026Q3"): frame([
@@ -75,6 +79,7 @@ FRAMES = {
         row(9999999, "Unlisted Fund LP", 50e6),
         row(TINY, "Tiny Base Biotech", 40e6),
         row(GAIN, "Gain On Debt Corp", 20e6),
+        row(INSURER, "Growth Insurance Holdings", 18e6),
     ]),
     ("NetIncomeLoss", "CY2025Q3"): frame([
         row(ACME, "Acme Robotics Inc.", 10e6, end="2025-09-30"),
@@ -177,6 +182,7 @@ SUBMISSIONS = {
     "cik": str(ACME),
     "name": "Acme Robotics Inc.",
     "tickers": ["ACME"],
+    "sic": "3571",
     "sicDescription": "Electronic Computers",
     "fiscalYearEnd": "1231",
     "filings": {"recent": {
@@ -329,6 +335,9 @@ def handler(request: httpx2.Request) -> httpx2.Response:
         return ok(ACME_FACTS)
     if path == f"/submissions/CIK{ACME:010d}.json":
         return ok(SUBMISSIONS)
+    if path == f"/submissions/CIK{INSURER:010d}.json":
+        return ok({"cik": str(INSURER), "name": "Growth Insurance Holdings", "sic": "6331",
+                   "sicDescription": "Fire, Marine & Casualty Insurance", "filings": {"recent": {}}})
     if path.startswith(f"/Archives/edgar/data/{ACME}/"):
         filename = path.rsplit("/", 1)[1]
         if filename in FORM4:

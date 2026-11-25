@@ -96,6 +96,41 @@ def test_screen_drops_non_operating_profit(client):
     assert kept["excluded_suspect"]["count"] == 0
 
 
+def test_screen_leaves_out_sector_groups(client):
+    from sec_edgar_mcp import sectors
+
+    result = run(screener.screen, client, period="CY2026Q3")
+    tickers = [r["ticker"] for r in result["results"]]
+    assert "GINS" not in tickers                               # insurer, SIC 6331
+    assert result["excluded_by_sector"]["insurance"]["tickers"] == ["GINS"]
+    acme = next(r for r in result["results"] if r["ticker"] == "ACME")
+    assert (acme["sic"], acme["industry"]) == (3571, "Electronic Computers")
+    swth = next(r for r in result["results"] if r["ticker"] == "SWTH")
+    assert swth["sic"] is None                                 # no submissions file: kept, unknown industry
+    assert result["filters"]["exclude_sectors"] == list(sectors.SECTOR_NAMES)
+
+    everything = run(screener.screen, client, period="CY2026Q3", exclude_sectors=[])
+    assert "GINS" in [r["ticker"] for r in everything["results"]]
+    assert "sic" not in everything["results"][0] and everything["excluded_by_sector"] == {}
+
+    no_banks = run(screener.screen, client, period="CY2026Q3", exclude_sectors=["banks_finance"])
+    assert "GINS" in [r["ticker"] for r in no_banks["results"]]
+
+    with pytest.raises(SecError, match="Unknown sector"):
+        run(screener.screen, client, period="CY2026Q3", exclude_sectors=["crypto"])
+
+
+def test_sector_groups_by_sic():
+    from sec_edgar_mcp.sectors import sector_group
+
+    assert sector_group(6798) == "real_estate" and sector_group(6512) == "real_estate"
+    assert sector_group(6770) == "funds_trusts" and sector_group(6221) == "funds_trusts"
+    assert sector_group(6022) == "banks_finance" and sector_group(6282) == "banks_finance"
+    assert sector_group(6331) == "insurance" and sector_group(4412) == "shipping"
+    assert sector_group(2834) == "biotech_pharma" and sector_group(8731) == "biotech_pharma"
+    assert sector_group(3571) is None and sector_group(3613) is None and sector_group(None) is None
+
+
 def test_trailing_quarters_and_eps():
     assert screener.trailing_quarters("CY2026Q1") == [(2026, 1), (2025, 4), (2025, 3), (2025, 2)]
     assert screener.eps_periods("CY2026Q3") == {

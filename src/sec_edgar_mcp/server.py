@@ -55,6 +55,8 @@ Prices and valuation (MASSIVE_API_KEY, free end-of-day plan; FINNHUB_API_KEY add
 - screen_companies with with_valuation=true (or max_pe / market-cap filters) adds a trailing-12-month
   P/E (from reported EPS) and P/S for every match; sort_by="pe" lists the cheapest first. Companies whose
   profit looks like a one-off are left out by default and listed under excluded_suspect.
+- screen_companies also leaves out funds, banks/finance, insurance, REITs/real estate, shipping and
+  biotech/pharma by default (SIC code); every match shows its sic and industry. exclude_sectors=[] keeps all.
 Always cite the accession number or URL that each figure comes from.
 """
 
@@ -113,6 +115,13 @@ async def screen_companies(
                           "margin over 60%, negative gross margin, EPS negative despite profit, or P/E under 3. "
                           "They are listed under excluded_suspect. Set false to keep them, with flags."),
     ] = True,
+    exclude_sectors: Annotated[
+        list[Literal["funds_trusts", "banks_finance", "insurance", "real_estate", "shipping", "biotech_pharma"]] | None,
+        Field(description="Sector groups (by SIC code) to leave out. Default (null): all six, since low P/E and "
+                          "fast growth mean something else for funds, banks, insurers, REITs, shipowners and biotech. "
+                          "[] keeps every sector; e.g. ['funds_trusts', 'banks_finance'] lets insurers back in. "
+                          "Remaining matches get sic and industry; left-out ones are listed in excluded_by_sector."),
+    ] = None,
 ) -> dict[str, Any]:
     """Screen ALL SEC filers at once on growth and profitability using XBRL frames.
 
@@ -142,6 +151,7 @@ async def screen_companies(
         min_market_cap_musd=min_market_cap_musd,
         max_market_cap_musd=max_market_cap_musd,
         exclude_suspect=exclude_suspect,
+        exclude_sectors=exclude_sectors,
     )
 
 

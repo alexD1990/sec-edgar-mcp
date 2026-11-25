@@ -135,10 +135,12 @@ async def main(ticker: str) -> None:
         table = await market.all_closes(massive)
         r = await screener.screen(client, min_revenue_growth_pct=30, max_revenue_musd=500, prices=table,
                                   max_pe=20, max_market_cap_musd=5000, sort_by="pe", limit=5)
-        top = ", ".join(f"{x['ticker']} (P/E {x['pe']} {x['pe_basis']}, +{x['revenue_growth_pct']}%)"
+        top = ", ".join(f"{x['ticker']} [{x.get('industry')}] (P/E {x['pe']} {x['pe_basis']}, +{x['revenue_growth_pct']}%)"
                         for x in r["results"])
         dropped = ", ".join(f"{e['ticker']} {'/'.join(e['flags'])}" for e in r["excluded_suspect"]["companies"][:8])
-        return f"{r['matches']} matches; cheapest: {top}\n     left out as suspect ({r['excluded_suspect']['count']}): {dropped}"
+        sectors = "; ".join(f"{g} {v['count']}: {', '.join(v['tickers'][:6])}" for g, v in r["excluded_by_sector"].items())
+        return (f"{r['matches']} matches; cheapest: {top}\n     left out as suspect "
+                f"({r['excluded_suspect']['count']}): {dropped}\n     left out by sector: {sectors or '-'}")
 
     await step(f"get_quote {ticker}", quote_step(ticker))
     await step("get_quote FPS (Up-C)", quote_step("FPS"))

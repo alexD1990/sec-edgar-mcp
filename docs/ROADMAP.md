@@ -2,8 +2,10 @@
 
 ## Neste: fra første screening (arbeidsflyt B, 25.11.2026)
 Mye av frasorteringen ble gjort manuelt. Disse skal inn i `screen_companies`:
-- [ ] **Bransjefilter via SIC-kode** (fra submissions): utelate fond, ETF-er, trusts, banker, forsikring,
-      REIT-er, shipping og biotek/legemidler som standard, med mulighet for å slå dem på igjen
+- [x] **Bransjefilter via SIC-kode** (fra submissions): `exclude_sectors` utelater som standard
+      funds_trusts, banks_finance, insurance, real_estate, shipping og biotech_pharma (`[]` = alle med).
+      Hvert treff får `sic` og `industry`; utelatte listes i `excluded_by_sector`. Bare treff som består de
+      andre filtrene slås opp (~8 per sekund), og SIC holdes i minnet så lenge serveren kjører
 - [x] **Urimelige marginer**: `exclude_suspect` (standard på) utelater og lister under `excluded_suspect`:
       netto margin > 60 %, negativ bruttomargin, nettoresultat > 1,5 × driftsresultat eller driftsunderskudd
       (NFE, EOSE, LTC), positivt resultat men EPS ≤ 0 (EOSE) og P/E < 3
@@ -32,7 +34,7 @@ Andre funn fra samme kjøring:
 - [ ] Vekstakselerasjon: vekst siste kvartal mot vekst kvartalet før
 - [ ] Filtrere bort selskaper med stor utvanning (antall aksjer opp mer enn X % på ett år)
 - [ ] Gjeld/egenkapital og kontantstrøm i screeningen
-- [ ] Bransjefilter via SIC-kode fra submissions
+- [x] Bransjefilter via SIC-kode fra submissions (se over)
 
 ## v0.3: faresignaler automatisk
 - [ ] `red_flags(company)`: samler revisorskifte (8-K 4.01), restatement (8-K 4.02), forsinkede rapporter (NT 10-K/10-Q),

@@ -124,14 +124,17 @@ class SecClient:
         raise SecError(f"Giving up on {url}: {last_error}")
 
     # ------------------------------------------------------------------ public API
-    async def get_json(self, url: str, *, ttl: float, params: dict[str, Any] | None = None) -> Any:
+    async def get_json(
+        self, url: str, *, ttl: float, params: dict[str, Any] | None = None, cache: bool = True
+    ) -> Any:
         key = f"json:{url}?{sorted((params or {}).items())}"
-        cached = self._cache_get(key)
+        cached = self._cache_get(key) if cache else None
         if cached is not None:
             return cached
         response = await self._request(url, params)
         data = response.json()
-        self._cache_put(key, data, ttl, len(response.content))
+        if cache:
+            self._cache_put(key, data, ttl, len(response.content))
         return data
 
     async def get_text(self, url: str, *, ttl: float, cache: bool = True) -> str:
@@ -158,8 +161,10 @@ class SecClient:
     async def company_facts(self, cik: int) -> dict[str, Any]:
         return await self.get_json(f"{DATA_BASE}/api/xbrl/companyfacts/CIK{cik:010d}.json", ttl=TTL_FACTS)
 
-    async def submissions(self, cik: int) -> dict[str, Any]:
-        return await self.get_json(f"{DATA_BASE}/submissions/CIK{cik:010d}.json", ttl=TTL_SUBMISSIONS)
+    async def submissions(self, cik: int, *, cache: bool = True) -> dict[str, Any]:
+        """cache=False for bulk lookups (e.g. the SIC code of every screening match), so hundreds of
+        filing histories do not push the frames out of the cache."""
+        return await self.get_json(f"{DATA_BASE}/submissions/CIK{cik:010d}.json", ttl=TTL_SUBMISSIONS, cache=cache)
 
     async def frame(self, concept: str, unit: str, period: str, taxonomy: str = "us-gaap") -> list[dict[str, Any]]:
         """One XBRL concept for every reporting company in one period (e.g. CY2025Q3, CY2024)."""

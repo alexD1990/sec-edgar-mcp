@@ -16,6 +16,7 @@ import anyio
 from .companies import ticker_map
 from .market import lookup_price
 from .sec_client import SecClient, SecError
+from .sectors import DEFAULT_EXCLUDED_SECTORS, SECTOR_GROUPS, check_sectors, industries
 
 REVENUE_CONCEPTS = (
     "Revenues",
@@ -184,12 +185,18 @@ async def screen(
     min_market_cap_musd: float | None = None,
     max_market_cap_musd: float | None = None,
     exclude_suspect: bool = True,
+    exclude_sectors: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """prices: {"date": ..., "prices": {ticker: close}} from market.all_closes. When given, rows get
     market cap, a trailing P/E and an annualized P/S, and the valuation filters apply.
 
     exclude_suspect drops rows whose figures fail a sanity check (see FLAG_TEXT); they are listed
-    under excluded_suspect instead. With exclude_suspect=False they stay in, with their flags."""
+    under excluded_suspect instead. With exclude_suspect=False they stay in, with their flags.
+
+    exclude_sectors: sector groups from sectors.SECTOR_GROUPS to leave out (None = all of them:
+    funds, banks/finance, insurance, real estate, shipping, biotech/pharma; [] = none). When any group
+    is excluded, every remaining match gets its SIC code and industry."""
+    sectors_out = check_sectors(DEFAULT_EXCLUDED_SECTORS if exclude_sectors is None else exclude_sectors)
     period = period or default_period()
     prior = previous_year(period)
     annual_factor = 4 if "Q" in period else 1
@@ -328,6 +335,20 @@ async def screen(
             **({"flags": flags} if flags else {}),
         })
 
+    by_sector: dict[str, list[str]] = {}
+    if sectors_out and rows:
+        info = await industries(client, [r["cik"] for r in rows])
+        kept = []
+        for r in rows:
+            ind = info.get(r["cik"], {})
+            r["sic"], r["industry"] = ind.get("sic"), ind.get("industry")
+            group = ind.get("sector_group")
+            if group in sectors_out:
+                by_sector.setdefault(group, []).append(r["ticker"])
+            else:
+                kept.append(r)
+        rows = kept
+
     key_map = {
         "revenue_growth": "revenue_growth_pct",
         "net_margin": "net_margin_pct",
@@ -360,6 +381,11 @@ async def screen(
             "min_market_cap_musd": min_market_cap_musd,
             "max_market_cap_musd": max_market_cap_musd,
             "exclude_suspect": exclude_suspect,
+            "exclude_sectors": list(sectors_out),
+        },
+        "excluded_by_sector": {
+            group: {"count": len(tickers), "tickers": tickers[:15], "what": SECTOR_GROUPS[group][0]}
+            for group, tickers in sorted(by_sector.items(), key=lambda kv: -len(kv[1]))
         },
         "excluded_suspect": {
             "count": len(excluded),
@@ -389,6 +415,11 @@ async def screen(
             f"{'one quarter x 4' if annual_factor == 4 else 'the full year'}. "
             "market_cap_musd counts the share class SEC frames report (one class for Class A/B companies), "
             "so it can be too low: confirm with get_quote."
+        )
+    if by_sector:
+        result["notes"].append(
+            f"{sum(len(t) for t in by_sector.values())} companies in excluded sector groups were left out (see "
+            "excluded_by_sector); pass exclude_sectors=[] or a shorter list to include them."
         )
     if excluded:
         result["notes"].append(
