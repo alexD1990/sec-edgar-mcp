@@ -440,6 +440,13 @@ def valuation(
     }
     if ttm:
         eps = ttm.get("eps_diluted")
+        out["eps_basis"] = "sum of reported diluted EPS, last four quarters"
+        if ttm.get("net_income_musd") is not None and latest_diluted:
+            # Summed EPS breaks across splits and IPOs (a derived Q4 mixes share counts); net income
+            # over the latest diluted share count is on the same basis as today's price.
+            eps = round(ttm["net_income_musd"] / latest_diluted, 2)
+            out["eps_basis"] = "net income last four quarters / diluted shares latest quarter"
+        out["eps_ttm"] = eps
         out["pe_ttm"] = _ratio(price, eps)
         out["ps_ttm"] = _ratio(market_cap, ttm.get("revenue_musd"))
         out["price_to_fcf_ttm"] = _ratio(market_cap, ttm.get("free_cash_flow_musd"))

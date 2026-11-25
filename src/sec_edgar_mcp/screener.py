@@ -186,6 +186,7 @@ async def screen(
     max_market_cap_musd: float | None = None,
     exclude_suspect: bool = True,
     exclude_sectors: list[str] | tuple[str, ...] | None = None,
+    keep_unknown_market_cap: bool = False,
 ) -> dict[str, Any]:
     """prices: {"date": ..., "prices": {ticker: close}} from market.all_closes. When given, rows get
     market cap, a trailing P/E and an annualized P/S, and the valuation filters apply.
@@ -291,9 +292,12 @@ async def screen(
             )
             shares = share_row["val"] if share_row else None
             cap = round(price * shares / 1e6, 1) if price and shares else None
-            if min_market_cap_musd is not None and (cap is None or cap < min_market_cap_musd):
+            # SEC frames lack a share count for many companies; the funnel keeps those and checks
+            # the size in stage 2 from the company's own filings (keep_unknown_market_cap).
+            unknown_ok = cap is None and keep_unknown_market_cap
+            if min_market_cap_musd is not None and not unknown_ok and (cap is None or cap < min_market_cap_musd):
                 continue
-            if max_market_cap_musd is not None and (cap is None or cap > max_market_cap_musd):
+            if max_market_cap_musd is not None and not unknown_ok and (cap is None or cap > max_market_cap_musd):
                 continue
             # P/E only from reported EPS: price and EPS are per share, so the share count (one class in
             # frames) cannot distort it, and gains that diluted EPS excludes stay out.

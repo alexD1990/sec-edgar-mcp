@@ -158,8 +158,11 @@ class SecClient:
         fields = raw["fields"]
         return [dict(zip(fields, row)) for row in raw["data"]]
 
-    async def company_facts(self, cik: int) -> dict[str, Any]:
-        return await self.get_json(f"{DATA_BASE}/api/xbrl/companyfacts/CIK{cik:010d}.json", ttl=TTL_FACTS)
+    async def company_facts(self, cik: int, *, cache: bool = True) -> dict[str, Any]:
+        """cache=False for bulk runs (the funnel reads hundreds of these files once each)."""
+        return await self.get_json(
+            f"{DATA_BASE}/api/xbrl/companyfacts/CIK{cik:010d}.json", ttl=TTL_FACTS, cache=cache
+        )
 
     async def submissions(self, cik: int, *, cache: bool = True) -> dict[str, Any]:
         """cache=False for bulk lookups (e.g. the SIC code of every screening match), so hundreds of

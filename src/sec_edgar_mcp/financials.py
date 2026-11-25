@@ -58,6 +58,8 @@ INSTANT_METRICS: dict[str, Metric] = {
         ("CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"),
         kind="instant",
     ),
+    "short_term_investments": Metric(("ShortTermInvestments", "MarketableSecuritiesCurrent"), kind="instant"),
+    "receivables": Metric(("AccountsReceivableNetCurrent",), kind="instant"),
     "inventory": Metric(("InventoryNet",), kind="instant"),
     "current_assets": Metric(("AssetsCurrent",), kind="instant"),
     "current_liabilities": Metric(("LiabilitiesCurrent",), kind="instant"),
@@ -96,11 +98,21 @@ def _duration_days(fact: dict[str, Any]) -> int | None:
     return (_d(fact["end"]) - _d(fact["start"])).days
 
 
+# Only figures from periodic reports. Proxy statements (DEF 14A) carry "pay versus performance"
+# tables tagged with the same concepts (revenue, net income) for other periods and definitions.
+PERIODIC_FORMS = ("10-K", "10-Q", "20-F", "40-F")
+
+
+def from_periodic_report(fact: dict[str, Any]) -> bool:
+    form = (fact.get("form") or "").upper()
+    return not form or form.startswith(PERIODIC_FORMS)
+
+
 def _facts_for(facts: dict[str, Any], metric: Metric, concept: str) -> list[dict[str, Any]]:
     node = facts.get("facts", {}).get(metric.taxonomy, {}).get(concept)
     if not node:
         return []
-    return node.get("units", {}).get(metric.unit, [])
+    return [f for f in node.get("units", {}).get(metric.unit, []) if from_periodic_report(f)]
 
 
 def _with_origin(fact: dict[str, Any], origin: dict[str, Any]) -> dict[str, Any]:
@@ -301,7 +313,7 @@ def debt_tags_on(facts: dict[str, Any], as_of: str) -> dict[str, float]:
         if not DEBT_TAG_RE.search(concept) or "FairValue" in concept or "Issuance" in concept:
             continue
         for fact in node.get("units", {}).get("USD", []):
-            if "start" in fact or fact.get("end") != as_of:
+            if "start" in fact or fact.get("end") != as_of or not from_periodic_report(fact):
                 continue
             filed = fact.get("filed", "")
             if concept not in found or filed > found[concept][0]:
