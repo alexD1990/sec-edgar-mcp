@@ -21,6 +21,7 @@ class Metric:
     unit: str = "USD"
     kind: str = "duration"  # "duration" (flows) or "instant" (balance sheet)
     additive: bool = True  # can Q4 be derived as FY - Q1 - Q2 - Q3?
+    approx_q4: bool = False  # not additive, but FY - Q1 - Q2 - Q3 is a usable estimate (EPS)
     taxonomy: str = "us-gaap"
 
 
@@ -42,6 +43,7 @@ DURATION_METRICS: dict[str, Metric] = {
         ("EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted", "EarningsPerShareBasic"),
         unit="USD/shares",
         additive=False,
+        approx_q4=True,
     ),
     "diluted_shares": Metric(("WeightedAverageNumberOfDilutedSharesOutstanding",), unit="shares", additive=False),
     "operating_cash_flow": Metric((
@@ -227,6 +229,8 @@ def _build_rows(per_metric: dict[str, dict[tuple[str, str], dict[str, Any]]]) ->
             row["_raw"][name] = fact["val"]
             if fact.get("derived"):
                 row["derived_from_annual"] = True
+            if fact.get("approx"):
+                row.setdefault("_approx", []).append(name)
             if fact.get("orig_fy") and "fiscal_year" not in row:
                 row["fiscal_year"] = fact.get("orig_fy")
                 row["fiscal_period"] = fact.get("orig_fp")
@@ -273,6 +277,11 @@ def _finish_rows(rows: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         }
         if row.get("derived_from_annual"):
             out["note"] = "Q4 derived as full year minus Q1-Q3"
+            if row.get("_approx"):
+                out["note"] += (
+                    f"; {', '.join(row['_approx'])} approximate (share count changes during the year), "
+                    "check the earnings release for the reported figure"
+                )
         finished.append({k: v for k, v in out.items() if v is not None})
     return finished
 
@@ -308,8 +317,13 @@ def summarize_financials(facts: dict[str, Any], years: int = 5, quarters: int = 
     for name, metric in DURATION_METRICS.items():
         periods = extract_durations(facts, metric)
         quarterly = dict(periods["quarterly"])
-        if metric.additive:
-            quarterly.update(derive_missing_q4(periods["annual"], periods["quarterly"]))
+        if metric.additive or metric.approx_q4:
+            derived = derive_missing_q4(periods["annual"], periods["quarterly"])
+            if metric.approx_q4:
+                for fact in derived.values():
+                    fact["val"] = round(fact["val"], 2)
+                    fact["approx"] = True
+            quarterly.update(derived)
         annual_by_metric[name] = periods["annual"]
         quarterly_by_metric[name] = quarterly
         used = sorted({f.get("concept") for f in list(periods["annual"].values()) + list(periods["quarterly"].values())} - {None})

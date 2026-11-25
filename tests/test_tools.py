@@ -320,3 +320,35 @@ def test_env_file_fills_missing_values_only(tmp_path, monkeypatch):
     assert os.environ["SEC_USER_AGENT"] == "Ola Nordmann ola@example.com"
     assert os.environ["MCP_AUTH_TOKEN"] == "abc123"
     assert os.environ["PORT"] == "1234"
+
+
+def test_q4_eps_is_estimated_and_labelled(client):
+    facts = run(client.company_facts, ACME)
+    result = financials.summarize_financials(facts)
+    q4 = next(r for r in result["quarterly"] if r["period_end"] == "2025-12-31")
+    assert q4["eps_diluted"] == 0.45  # 1.20 - 0.20 - 0.25 - 0.30
+    assert "eps_diluted approximate" in q4["note"]
+    q3 = next(r for r in result["quarterly"] if r["period_end"] == "2025-09-30")
+    assert "note" not in q3
+
+
+def test_find_inside_a_filing(client):
+    result = run(filings.read_filing, client, ACME, form="10-K", find="single   supplier")
+    assert result["total_matches"] == 1
+    match = result["matches"][0]
+    assert "63% of our components" in match["snippet"]
+    page = run(filings.read_filing, client, ACME, form="10-K", offset=match["offset"], max_chars=1000)
+    assert page["text"].startswith(match["snippet"][:200])
+
+    many = filings.find_in_text("aa x " * 50 + " " * 5000 + "aa", "AA", context_chars=200, max_matches=1)
+    assert many["total_matches"] == 51 and many["snippets_returned"] == 1 and many["more_snippets"] is True
+    assert filings.find_in_text("abc", "zzz")["total_matches"] == 0
+
+
+def test_insider_coverage_is_reported(client):
+    full = run(insiders.insider_trades, client, ACME, days=90, today=date(2026, 11, 25))
+    assert full["form4_filings_in_window"] == 4 and full["more_filings_not_read"] is False
+    assert full["covered_from"] == "2026-11-04"
+    capped = run(insiders.insider_trades, client, ACME, days=90, max_filings=2, today=date(2026, 11, 25))
+    assert capped["form4_filings_read"] == 2 and capped["more_filings_not_read"] is True
+    assert capped["covered_from"] == "2026-11-10"  # newest kept, oldest dropped

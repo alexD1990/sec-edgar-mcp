@@ -113,7 +113,7 @@ async def insider_trades(
     cik: int,
     *,
     days: int = 90,
-    max_filings: int = 60,
+    max_filings: int = 150,
     include_all_codes: bool = False,
     today: date | None = None,
 ) -> dict[str, Any]:
@@ -129,8 +129,9 @@ async def insider_trades(
         if filed < cutoff:
             continue
         candidates.append((recent["accessionNumber"][i], filed, recent["primaryDocument"][i]))
-    truncated = len(candidates) > max_filings
-    candidates = candidates[:max_filings]
+    in_window = len(candidates)
+    truncated = in_window > max_filings
+    candidates = candidates[:max_filings]  # newest first, so truncation drops the oldest
 
     parsed: list[tuple[str, str, dict[str, Any]]] = []
     errors: list[str] = []
@@ -193,8 +194,10 @@ async def insider_trades(
         "cik": cik,
         "company": subs.get("name"),
         "window_days": days,
+        "form4_filings_in_window": in_window,
         "form4_filings_read": len(parsed),
         "more_filings_not_read": truncated,
+        "covered_from": min((filed for _, filed, _ in parsed), default=None),
         "open_market_purchases": buys,
         "open_market_sales": sells,
         "net_open_market_usd": round(buys["value_usd"] - sells["value_usd"], 2),
@@ -206,5 +209,7 @@ async def insider_trades(
             "exercises (M) are compensation mechanics.",
             "Sales under a Rule 10b5-1 plan were scheduled in advance and say less about the insider's view.",
             "Identical trades reported by several joint owners are counted once (see also_reported_by).",
+            "If more_filings_not_read is true, trades before covered_from were not read: "
+            "raise max_filings or shorten days.",
         ],
     }

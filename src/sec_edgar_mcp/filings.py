@@ -232,6 +232,9 @@ async def read_filing(
     accession: str | None = None,
     offset: int = 0,
     max_chars: int = 20000,
+    find: str | None = None,
+    context_chars: int = 1500,
+    max_matches: int = 8,
 ) -> dict[str, Any]:
     subs = await client.submissions(cik)
     filings = recent_filings(subs)
@@ -273,6 +276,19 @@ async def read_filing(
             )
         text = extracted
 
+    header = {
+        "company": subs.get("name"),
+        "form": form_type,
+        "filed": match["filed"],
+        "report_date": match["report_date"],
+        "accession": match["accession"],
+        "section": section,
+        "documents": documents,
+        "total_chars": len(text),
+    }
+    if find:
+        return {**header, **find_in_text(text, find, context_chars=context_chars, max_matches=max_matches)}
+
     max_chars = max(1000, min(max_chars, 60000))
     chunk = text[offset:offset + max_chars]
     next_offset = offset + len(chunk)
@@ -288,6 +304,41 @@ async def read_filing(
         "offset": offset,
         "next_offset": next_offset if next_offset < len(text) else None,
         "text": chunk,
+    }
+
+
+def find_in_text(text: str, query: str, *, context_chars: int = 1500, max_matches: int = 8) -> dict[str, Any]:
+    """Snippets around every occurrence of query (case-insensitive, any whitespace between words).
+
+    Nearby hits are merged into one snippet. Each snippet carries its offset so the caller can
+    continue reading from there with offset paging.
+    """
+    words = query.split()
+    if not words:
+        return {"find": query, "total_matches": 0, "matches": []}
+    pattern = re.compile(r"\s+".join(re.escape(w) for w in words), re.I)
+    hits = [m.start() for m in pattern.finditer(text)]
+    context_chars = max(200, min(context_chars, 6000))
+    windows: list[list[int]] = []
+    for pos in hits:
+        start, end = max(0, pos - context_chars // 3), min(len(text), pos + context_chars)
+        if windows and start <= windows[-1][1]:
+            windows[-1][1] = max(windows[-1][1], end)
+            windows[-1][2] += 1
+        else:
+            windows.append([start, end, 1])
+    matches = [
+        {"offset": start, "hits": count, "snippet": text[start:end]}
+        for start, end, count in windows[: max(1, min(max_matches, 30))]
+    ]
+    return {
+        "find": query,
+        "total_matches": len(hits),
+        "snippets_returned": len(matches),
+        "more_snippets": len(windows) > len(matches),
+        "matches": matches,
+        "hint": "Read on from a snippet with offset=<its offset> and no find." if matches else
+                "No matches. Try a shorter phrase or another word.",
     }
 
 

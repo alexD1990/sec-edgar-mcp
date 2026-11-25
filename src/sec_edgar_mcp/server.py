@@ -124,12 +124,17 @@ async def get_insider_trades(
     include_all_codes: Annotated[
         bool, Field(description="Also list grants, tax withholding, exercises etc. (default: only open-market buys and sells).")
     ] = False,
+    max_filings: Annotated[
+        int, Field(ge=10, le=400, description="Most Form 4 filings to read (newest first). Large companies file many.")
+    ] = 150,
 ) -> dict[str, Any]:
     """Insider transactions from Form 4 filings: open-market purchases and sales by officers,
     directors and 10% owners, with totals, prices, holdings after the trade and Rule 10b5-1 flags."""
     client = get_client()
     info = await resolve_company(client, company)
-    return await insider_trades(client, info["cik"], days=days, include_all_codes=include_all_codes)
+    return await insider_trades(
+        client, info["cik"], days=days, include_all_codes=include_all_codes, max_filings=max_filings
+    )
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -163,17 +168,26 @@ async def read_filing(
     accession: Annotated[str | None, Field(description="A specific filing (from get_filings). Default: the latest of this form.")] = None,
     offset: Annotated[int, Field(ge=0, description="Character offset for paging through long text (use next_offset).")] = 0,
     max_chars: Annotated[int, Field(ge=1000, le=60000)] = 20000,
+    find: Annotated[
+        str | None,
+        Field(description=(
+            "Search inside the chosen document/section instead of paging: returns snippets around each "
+            "match with their offsets, e.g. find='Commitments and Contingencies' or 'export control'."
+        )),
+    ] = None,
+    context_chars: Annotated[int, Field(ge=200, le=6000, description="Snippet length when using find.")] = 1500,
 ) -> dict[str, Any]:
     """Read the text of a filing or one section of it, as clean plain text with paging.
 
     Good for finding red flags: auditor_report (adverse opinions, going concern), controls_and_procedures
     (material weaknesses), risk_factors (customer/supplier concentration), legal_proceedings, and 8-K
-    earnings press releases.
+    earnings press releases. Use find to jump straight to a note or topic in a long document.
     """
     client = get_client()
     info = await resolve_company(client, company)
     return await read_filing_text(
-        client, info["cik"], form=form, section=section, accession=accession, offset=offset, max_chars=max_chars
+        client, info["cik"], form=form, section=section, accession=accession, offset=offset,
+        max_chars=max_chars, find=find, context_chars=context_chars,
     )
 
 
