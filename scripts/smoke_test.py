@@ -113,11 +113,13 @@ async def main(ticker: str) -> None:
         async def run_quote():
             sym_info = await resolve_company(client, symbol)
             q = await market.best_quote(massive, finnhub, sym_info["ticker"])
-            v = market.valuation(q, await client.company_facts(sym_info["cik"]))
+            cover = await market.cover_page_shares(client, sym_info["cik"])
+            v = market.valuation(q, await client.company_facts(sym_info["cik"]), cover)
             classes = (v.get("shares_detail") or {}).get("per_class_m")
+            warn = " | NOTE: " + " / ".join(v["notes"]) if v.get("notes") else ""
             return (f"${q['price']} ({q.get('price_time')}, {q.get('price_source')}), "
                     f"52w {q.get('week52_low')}-{q.get('week52_high')}, cap {v['market_cap_musd']}m, "
-                    f"classes {classes}, P/E {v['pe_ttm']}, P/S {v['ps_ttm']}")
+                    f"classes {classes} [{v['shares_source']}], P/E {v['pe_ttm']}, P/S {v['ps_ttm']}{warn}")
         return run_quote
 
     async def history():
@@ -133,8 +135,10 @@ async def main(ticker: str) -> None:
         table = await market.all_closes(massive)
         r = await screener.screen(client, min_revenue_growth_pct=30, max_revenue_musd=500, prices=table,
                                   max_pe=20, max_market_cap_musd=5000, sort_by="pe", limit=5)
-        top = ", ".join(f"{x['ticker']} (P/E {x['pe_annualized']}, +{x['revenue_growth_pct']}%)" for x in r["results"])
-        return f"{r['matches']} matches; cheapest: {top}"
+        top = ", ".join(f"{x['ticker']} (P/E {x['pe']} {x['pe_basis']}, +{x['revenue_growth_pct']}%)"
+                        for x in r["results"])
+        dropped = ", ".join(f"{e['ticker']} {'/'.join(e['flags'])}" for e in r["excluded_suspect"]["companies"][:8])
+        return f"{r['matches']} matches; cheapest: {top}\n     left out as suspect ({r['excluded_suspect']['count']}): {dropped}"
 
     await step(f"get_quote {ticker}", quote_step(ticker))
     await step("get_quote FPS (Up-C)", quote_step("FPS"))

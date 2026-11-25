@@ -24,7 +24,7 @@ from .insiders import insider_trades
 from .macro import eia_browse as eia_browse_route
 from .macro import eia_data as eia_data_query
 from .macro import electricity_sales, fred_search as fred_search_series, fred_series as fred_series_data
-from .market import all_closes, best_quote, price_history, valuation
+from .market import all_closes, best_quote, cover_page_shares, price_history, valuation
 from .screener import screen
 from .sec_client import get_client
 
@@ -52,8 +52,9 @@ Prices and valuation (MASSIVE_API_KEY, free end-of-day plan; FINNHUB_API_KEY add
 - get_quote: price and 52-week range, plus market cap, P/E, P/S and P/FCF computed from the
   company's own filings (share classes summed).
 - get_price_history: returns over 1m/3m/6m/1y, distance from high, volatility.
-- screen_companies with with_valuation=true (or max_pe / market-cap filters) adds a rough P/E and P/S
-  for every match; sort_by="pe" lists the cheapest first.
+- screen_companies with with_valuation=true (or max_pe / market-cap filters) adds a trailing-12-month
+  P/E (from reported EPS) and P/S for every match; sort_by="pe" lists the cheapest first. Companies whose
+  profit looks like a one-off are left out by default and listed under excluded_suspect.
 Always cite the accession number or URL that each figure comes from.
 """
 
@@ -101,11 +102,17 @@ async def screen_companies(
     ] = "revenue_growth",
     limit: Annotated[int, Field(ge=1, le=200)] = 50,
     with_valuation: Annotated[
-        bool, Field(description="Add closing price, market cap and annualized P/E and P/S (Massive, one extra request).")
+        bool, Field(description="Add closing price, market cap, trailing-12-month P/E and P/S (Massive, one extra request).")
     ] = False,
-    max_pe: Annotated[float | None, Field(description="Maximum annualized P/E (implies with_valuation).")] = None,
+    max_pe: Annotated[float | None, Field(description="Maximum trailing P/E (implies with_valuation).")] = None,
     min_market_cap_musd: Annotated[float | None, Field(description="Minimum market cap, USD millions.")] = None,
     max_market_cap_musd: Annotated[float | None, Field(description="Maximum market cap, USD millions (e.g. 2000 for small caps).")] = None,
+    exclude_suspect: Annotated[
+        bool,
+        Field(description="Leave out companies whose profit looks like a one-off: profit mostly non-operating, net "
+                          "margin over 60%, negative gross margin, EPS negative despite profit, or P/E under 3. "
+                          "They are listed under excluded_suspect. Set false to keep them, with flags."),
+    ] = True,
 ) -> dict[str, Any]:
     """Screen ALL SEC filers at once on growth and profitability using XBRL frames.
 
@@ -134,6 +141,7 @@ async def screen_companies(
         max_pe=max_pe,
         min_market_cap_musd=min_market_cap_musd,
         max_market_cap_musd=max_market_cap_musd,
+        exclude_suspect=exclude_suspect,
     )
 
 
@@ -147,9 +155,10 @@ async def get_quote(company: Company) -> dict[str, Any]:
         raise ToolError(f"{info.get('name')} has no ticker on EDGAR, so there is no stock price.")
     quote = await best_quote(get_api_client("massive"), get_api_client("finnhub"), info["ticker"])
     facts = await client.company_facts(info["cik"])
+    cover = await cover_page_shares(client, info["cik"])
     return {
         "company": info.get("name"), "ticker": info["ticker"], "cik": info["cik"],
-        "quote": quote, "valuation": valuation(quote, facts),
+        "quote": quote, "valuation": valuation(quote, facts, cover),
     }
 
 

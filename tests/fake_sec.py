@@ -11,6 +11,7 @@ OTC_CO = 1000002
 SHRINK = 1000003
 SWITCHER = 1000004
 TINY = 1000005
+GAIN = 1000006
 LAST_SEARCH_PARAMS: dict = {}
 
 TICKERS = {
@@ -22,6 +23,7 @@ TICKERS = {
         [SHRINK, "Shrinking Widgets Co", "SHRK", "NYSE"],
         [SWITCHER, "Switcher Tag Holdings", "SWTH", "NYSE"],
         [TINY, "Tiny Base Biotech", "TINY", "Nasdaq"],
+        [GAIN, "Gain On Debt Corp", "GAIN", "NYSE"],
     ],
 }
 
@@ -41,6 +43,7 @@ FRAMES = {
         row(SHRINK, "Shrinking Widgets Co", 50e6),
         row(9999999, "Unlisted Fund LP", 500e6),
         row(TINY, "Tiny Base Biotech", 50e6),  # one-off licence fee
+        row(GAIN, "Gain On Debt Corp", 100e6),
     ]),
     ("Revenues", "CY2025Q3"): frame([
         row(ACME, "Acme Robotics Inc.", 150e6, end="2025-09-30"),
@@ -48,6 +51,13 @@ FRAMES = {
         row(SHRINK, "Shrinking Widgets Co", 80e6, end="2025-09-30"),
         row(9999999, "Unlisted Fund LP", 100e6, end="2025-09-30"),
         row(TINY, "Tiny Base Biotech", 1e6, end="2025-09-30"),
+        row(GAIN, "Gain On Debt Corp", 60e6, end="2025-09-30"),
+    ]),
+    # Operating income: GAIN loses money in the business; its profit is a gain on debt (like NFE/EOSE)
+    ("OperatingIncomeLoss", "CY2026Q3"): frame([
+        row(ACME, "Acme Robotics Inc.", 40e6),
+        row(SWITCHER, "Switcher Tag Holdings", 15e6),
+        row(GAIN, "Gain On Debt Corp", -5e6),
     ]),
     # Switcher only uses the ASC 606 tag
     ("RevenueFromContractWithCustomerExcludingAssessedTax", "CY2026Q3"): frame([
@@ -64,6 +74,7 @@ FRAMES = {
         row(SWITCHER, "Switcher Tag Holdings", 12e6),
         row(9999999, "Unlisted Fund LP", 50e6),
         row(TINY, "Tiny Base Biotech", 40e6),
+        row(GAIN, "Gain On Debt Corp", 20e6),
     ]),
     ("NetIncomeLoss", "CY2025Q3"): frame([
         row(ACME, "Acme Robotics Inc.", 10e6, end="2025-09-30"),
@@ -73,8 +84,17 @@ FRAMES = {
     # Used by the screener's valuation
     ("EarningsPerShareDiluted", "CY2026Q3"): frame([
         row(ACME, "Acme Robotics Inc.", 0.60),
-        row(SWITCHER, "Switcher Tag Holdings", 0.24),
+        row(SWITCHER, "Switcher Tag Holdings", 0.24),  # only this quarter: falls back to 1 quarter x 4
     ]),
+    ("EarningsPerShareDiluted", "CY2026Q2"): frame([row(ACME, "Acme Robotics Inc.", 0.55, end="2026-06-30")]),
+    ("EarningsPerShareDiluted", "CY2026Q1"): frame([row(ACME, "Acme Robotics Inc.", 0.50, end="2026-03-31")]),
+    # No CY2025Q4 frame for ACME: Q4 = full year 1.20 - (0.20 + 0.25 + 0.30) = 0.45
+    ("EarningsPerShareDiluted", "CY2025"): frame([row(ACME, "Acme Robotics Inc.", 1.20, end="2025-12-31")]),
+    ("EarningsPerShareDiluted", "CY2025Q1"): frame([row(ACME, "Acme Robotics Inc.", 0.20, end="2025-03-31")]),
+    ("EarningsPerShareDiluted", "CY2025Q2"): frame([row(ACME, "Acme Robotics Inc.", 0.25, end="2025-06-30")]),
+    ("EarningsPerShareDiluted", "CY2025Q3"): frame([row(ACME, "Acme Robotics Inc.", 0.30, end="2025-09-30")]),
+    # GAIN tags only the combined concept, and its gain is excluded from EPS
+    ("EarningsPerShareBasicAndDiluted", "CY2026Q3"): frame([row(GAIN, "Gain On Debt Corp", -0.05)]),
     # Cover-page share counts are dated after quarter end, so most land in the next quarter's frame
     ("EntityCommonStockSharesOutstanding", "CY2026Q4I"): frame([
         row(ACME, "Acme Robotics Inc.", 50e6, end="2026-10-31"),
@@ -241,6 +261,28 @@ weakness, Acme has not maintained effective internal control. """ + ("Control de
 <h2>Item 9. Changes in and Disagreements with Accountants</h2><p>None.</p>
 </body></html>"""
 
+# Inline-XBRL 10-Q cover page: two share classes (one with scale=6), a duplicate of the Class A fact and an
+# undimensioned total that must not be added on top of the classes.
+TEN_Q_HTML = """<html xmlns:ix="http://www.xbrl.org/2013/inlineXBRL"><body>
+<div style="display:none"><ix:header><ix:resources>
+<xbrli:context id="c-1"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001000001</xbrli:identifier>
+</xbrli:entity><xbrli:period><xbrli:instant>2026-10-31</xbrli:instant></xbrli:period></xbrli:context>
+<xbrli:context id="c-2"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001000001</xbrli:identifier>
+<xbrli:segment><xbrldi:explicitMember dimension="us-gaap:StatementClassOfStockAxis">us-gaap:CommonClassAMember</xbrldi:explicitMember></xbrli:segment>
+</xbrli:entity><xbrli:period><xbrli:instant>2026-10-31</xbrli:instant></xbrli:period></xbrli:context>
+<xbrli:context id="c-3"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0001000001</xbrli:identifier>
+<xbrli:segment><xbrldi:explicitMember dimension="us-gaap:StatementClassOfStockAxis">us-gaap:CommonClassBMember</xbrldi:explicitMember></xbrli:segment>
+</xbrli:entity><xbrli:period><xbrli:instant>2026-10-31</xbrli:instant></xbrli:period></xbrli:context>
+</ix:resources></ix:header></div>
+<p>As of October 31, 2026, the registrant had
+<ix:nonFraction unitRef="shares" contextRef="c-2" decimals="INF" name="dei:EntityCommonStockSharesOutstanding" format="ixt:num-dot-decimal" scale="0">42,000,000</ix:nonFraction>
+shares of Class A common stock and
+<ix:nonFraction unitRef="shares" contextRef="c-3" decimals="-5" name="dei:EntityCommonStockSharesOutstanding" format="ixt:num-dot-decimal" scale="6">8.0</ix:nonFraction>
+million shares of Class B common stock outstanding
+(<ix:nonFraction unitRef="shares" contextRef="c-1" decimals="INF" name="dei:EntityCommonStockSharesOutstanding" scale="0">50,000,000</ix:nonFraction> in total).</p>
+<p>Class A again: <ix:nonFraction unitRef="shares" contextRef="c-2" decimals="INF" name="dei:EntityCommonStockSharesOutstanding" scale="0"><span>42,000,000</span></ix:nonFraction></p>
+</body></html>"""
+
 EIGHT_K_HTML = "<html><body><p>Item 2.02 Results of Operations. See Exhibit 99.1.</p></body></html>"
 EX99_HTML = "<html><body><p>Acme reports record revenue of $300 million, up 100% year over year.</p></body></html>"
 EIGHT_K_INDEX_PAGE = """<?xml version="1.0"?><html><body>
@@ -293,6 +335,8 @@ def handler(request: httpx2.Request) -> httpx2.Response:
             return ok(FORM4[filename])
         if filename == "acme-20251231.htm":
             return ok(TEN_K_HTML)
+        if filename == "acme-20260930.htm":
+            return ok(TEN_Q_HTML)
         if filename == "acme-8k.htm":
             return ok(EIGHT_K_HTML)
         if filename in ("acme-ex991.htm", "q3fy26results.htm"):

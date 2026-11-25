@@ -190,6 +190,50 @@ def test_price_history_statistics(massive):
     assert hist["annualized_volatility_pct"] > 0
 
 
+def test_price_history_one_year_window_has_a_1y_change(massive):
+    """365 calendar days can hold exactly 252 trading days; 1y must still be computed."""
+    hist = run(market.price_history, massive, "UPCO", days=365, today=date(2026, 11, 25))
+    assert hist["from"] == "2025-11-24" and hist["to"] == "2026-11-24"
+    closes = {datetime.fromtimestamp(b["t"] / 1000, tz=timezone.utc).date().isoformat(): b["c"]
+              for b in bars(date(2026, 11, 24))}
+    assert hist["change_pct"]["1y"] == round(100 * (30.0 / closes["2025-11-24"] - 1), 1)
+    assert hist["change_pct"]["1m"] == round(100 * (30.0 / closes["2026-10-23"] - 1), 1)  # 10-25 is a Sunday
+
+    short = run(market.price_history, massive, "UPCO", days=100, today=date(2026, 11, 25))
+    assert short["change_pct"]["1y"] is None and short["change_pct"]["3m"] is not None
+
+
+def test_cover_page_shares_from_inline_xbrl():
+    from fake_sec import TEN_Q_HTML
+
+    parsed = market.parse_cover_shares(TEN_Q_HTML)
+    assert parsed["shares_m"] == 50.0                   # 42 + 8; the undimensioned total is not added
+    assert parsed["classes"] == [{"class": "CommonClassA", "shares_m": 42.0},
+                                 {"class": "CommonClassB", "shares_m": 8.0}]  # scale=6 applied, duplicate ignored
+    assert parsed["as_of"] == "2026-10-31"
+    only_total = (
+        '<xbrli:context id="t"><xbrli:period><xbrli:instant>2026-10-31</xbrli:instant></xbrli:period></xbrli:context>'
+        '<ix:nonFraction name="dei:EntityCommonStockSharesOutstanding" contextRef="t" scale="3">1,500</ix:nonFraction>'
+    )
+    single = market.parse_cover_shares(only_total)
+    assert single["shares_m"] == 1.5 and single["classes"] == [{"class": "all classes", "shares_m": 1.5}]
+    assert market.parse_cover_shares("<html>no xbrl</html>") is None
+
+
+def test_cover_page_shares_reads_latest_10q_and_feeds_valuation():
+    from fake_sec import ACME
+
+    client = SecClient("Test Runner test@example.com", max_requests_per_second=1000, transport=transport())
+    market._cover_cache.clear()
+    cover = run(market.cover_page_shares, client, ACME)
+    assert cover["shares_m"] == 50.0 and cover["form"] == "10-Q" and cover["accession"] == "0001-26-000047"
+    assert cover["url"].endswith("/acme-20260930.htm")
+
+    val = market.valuation({"price": 10.0}, UPCO_FACTS, cover)
+    assert val["market_cap_musd"] == 500.0              # the cover from the filing wins over companyfacts
+    assert val["shares_source"].startswith("cover page of 10-Q filed 2026-11-05")
+
+
 def test_all_closes_steps_back_to_a_released_day(massive):
     closes = run(market.all_closes, massive, today=date(2026, 11, 25))
     assert closes["date"] == "2026-11-23"              # 11-24 not released yet on the free plan
@@ -211,11 +255,16 @@ def test_screen_with_valuation(massive):
         result = run(screener.screen, client, period="CY2026Q3", prices=prices, sort_by="pe")
         by_ticker = {r["ticker"]: r for r in result["results"]}
         assert by_ticker["ACME"]["market_cap_musd"] == 2400.0   # newest share count (50M) x $48
-        assert by_ticker["ACME"]["pe_annualized"] == 20.0       # 48 / (0.60 x 4)
+        # Trailing EPS: Q3 0.60 + Q2 0.55 + Q1 0.50 + Q4 derived 1.20 - 0.75 = 2.10
+        assert by_ticker["ACME"]["eps_12m"] == 2.1
+        assert by_ticker["ACME"]["pe"] == round(48 / 2.1, 1)
+        assert by_ticker["ACME"]["pe_basis"] == "ttm (Q4 derived from full year)"
         assert by_ticker["SWTH"]["market_cap_musd"] == 480.0    # count from the Q3 frame
-        assert by_ticker["SWTH"]["pe_annualized"] == 10.0       # 9.6 / (0.24 x 4)
+        assert by_ticker["SWTH"]["pe"] == 10.0                  # 9.6 / (0.24 x 4): only one quarter known
+        assert by_ticker["SWTH"]["pe_basis"] == "1 quarter x 4"
         assert [r["ticker"] for r in result["results"]][:2] == ["SWTH", "ACME"]  # cheapest first
         assert result["prices_from"] == "2026-11-23"
+        assert "GAIN" not in by_ticker                          # profit from a gain: left out
 
         cheap = run(screener.screen, client, period="CY2026Q3", prices=prices, max_pe=15)
         assert [r["ticker"] for r in cheap["results"]] == ["SWTH"]
@@ -224,6 +273,6 @@ def test_screen_with_valuation(massive):
         assert [r["ticker"] for r in small["results"]] == ["SWTH"]
 
         plain = run(screener.screen, client, period="CY2026Q3")
-        assert "pe_annualized" not in plain["results"][0] and not plain["with_valuation"]
+        assert "pe" not in plain["results"][0] and not plain["with_valuation"]
     finally:
         set_client(None)

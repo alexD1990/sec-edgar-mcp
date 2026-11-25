@@ -70,10 +70,48 @@ def test_screen_filters_and_tag_fallback(client):
     capped = run(screener.screen, client, period="CY2026Q3", max_revenue_musd=200)
     assert [r["ticker"] for r in capped["results"]] == ["SWTH"]
 
-    # +4900% from a $1m base is excluded by default, allowed when asked for
+    # +4900% from a $1m base is excluded by default; with a tiny base allowed, its 80% margin is still suspect
     assert "TINY" not in tickers
-    tiny_ok = run(screener.screen, client, period="CY2026Q3", min_prev_revenue_musd=0)
+    tiny = run(screener.screen, client, period="CY2026Q3", min_prev_revenue_musd=0)
+    assert "TINY" not in [r["ticker"] for r in tiny["results"]]
+    assert {"ticker": "TINY", "name": "Tiny Base Biotech", "flags": ["net_margin_over_60pct"]} in \
+        tiny["excluded_suspect"]["companies"]
+    tiny_ok = run(screener.screen, client, period="CY2026Q3", min_prev_revenue_musd=0, exclude_suspect=False)
     assert tiny_ok["results"][0]["ticker"] == "TINY"
+    assert tiny_ok["results"][0]["flags"] == ["net_margin_over_60pct"]
+
+
+def test_screen_drops_non_operating_profit(client):
+    """Like NFE/EOSE: positive net income from a gain while the business loses money."""
+    result = run(screener.screen, client, period="CY2026Q3")
+    assert "GAIN" not in [r["ticker"] for r in result["results"]]
+    gain = next(e for e in result["excluded_suspect"]["companies"] if e["ticker"] == "GAIN")
+    assert gain["flags"] == ["profit_mostly_non_operating", "loss_per_share_despite_profit"]
+    assert "profit_mostly_non_operating" in result["excluded_suspect"]["flag_meanings"]
+    acme = next(r for r in result["results"] if r["ticker"] == "ACME")
+    assert acme["operating_income_musd"] == 40.0 and "flags" not in acme
+
+    kept = run(screener.screen, client, period="CY2026Q3", exclude_suspect=False)
+    assert "GAIN" in [r["ticker"] for r in kept["results"]]
+    assert kept["excluded_suspect"]["count"] == 0
+
+
+def test_trailing_quarters_and_eps():
+    assert screener.trailing_quarters("CY2026Q1") == [(2026, 1), (2025, 4), (2025, 3), (2025, 2)]
+    assert screener.eps_periods("CY2026Q3") == {
+        "CY2026Q3", "CY2026Q2", "CY2026Q1", "CY2025Q4", "CY2025", "CY2025Q1", "CY2025Q2", "CY2025Q3"}
+    assert screener.eps_periods("CY2025") == {"CY2025"}
+
+    def frames(values):
+        return {p: {1: {"val": v}} for p, v in values.items()}
+
+    full = frames({"CY2026Q3": 1.0, "CY2026Q2": 1.0, "CY2026Q1": 1.0, "CY2025Q4": 1.0})
+    assert screener.trailing_eps(1, full, "CY2026Q3") == (4.0, "ttm")
+    three = frames({"CY2026Q3": 1.0, "CY2026Q2": 1.0, "CY2026Q1": 1.0})  # June fiscal year: Q4 has no frame
+    assert screener.trailing_eps(1, three, "CY2026Q3") == (4.0, "3 quarters annualized")
+    one = frames({"CY2026Q3": 0.5})
+    assert screener.trailing_eps(1, one, "CY2026Q3") == (2.0, "1 quarter x 4")
+    assert screener.trailing_eps(1, frames({"CY2026Q2": 1.0}), "CY2026Q3") == (None, None)
 
 
 def test_screen_missing_period(client):
